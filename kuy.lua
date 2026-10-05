@@ -7,7 +7,9 @@
       - มือปืน 2 โหมด:  1) ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง)
                          2) ยิงทะลุ (กระสุนวาปติด hitbox ฆาตกร)
       - ฆาตกร: ฆ่าทั้งแมพ วาปไปหา hitbox ทีละคน
-      - ปุ่มลอย 3 ปุ่ม: SHOOT / KILL ALL / GUN (วาปไปเก็บปืนที่ดรอป)
+      - ฆาตกร: โยนมีด (มีดวาปไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด)
+      - ปุ่มลอย: SHOOT / MODE / THROW (โยนมีด) / GRAB GUN (เก็บปืนที่ดรอป)
+      - เปิด/ปิดการแจ้งเตือนได้ (แท็บ อื่นๆ)
         ล็อกตำแหน่ง ปรับขนาด รีเซ็ตตำแหน่งได้
       - FPS Boost + Unlock FPS
 ]]
@@ -58,8 +60,9 @@ local S = {
     SilentAim = false, ShootMode = MODE_1, AimPart = "Torso",
     ArgMode = "CFrame, CFrame",
     -- ปุ่มลอย
-    ShootBtn = false, ModeBtn = false, KillBtn = false, GunBtn = false, LockBtn = false, BtnSize = 140, ShootSize = 64,
+    ShootBtn = false, ModeBtn = false, ThrowBtn = false, GunBtn = false, LockBtn = false, BtnSize = 140, ShootSize = 64,
     -- ฆาตกร
+    Notify = true,    -- เปิด/ปิดการแจ้งเตือน
     KillDelay = 250, KillRetries = 3, KillReturn = true,
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
@@ -77,6 +80,7 @@ Gui.Parent = SafeParent()
 
 local WindRef, WindowObj = nil, nil
 local function Notify(title, content)
+    if not S.Notify then return end
     if WindRef then
         local ok = pcall(function()
             WindRef:Notify({ Title = title, Content = content, Duration = 3 })
@@ -958,6 +962,75 @@ local function KillAll(silent)
     end
 end
 
+-- โยนมีด: เลือกผู้เล่นที่อยู่ใกล้แนวกล้องที่สุด แล้วส่งมีดไปที่ hitbox
+local ThrowBusy = false
+local function PickThrowTarget(myPos)
+    local cam = Workspace.CurrentCamera
+    local look = cam and cam.CFrame.LookVector
+    local best, bestScore = nil, -math.huge
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP and IsAlive(plr) and GetRole(plr) ~= "Dead" then
+            local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dir = hrp.Position - (cam and cam.CFrame.Position or myPos)
+                local score = look and dir.Magnitude > 0 and look:Dot(dir.Unit) or -dir.Magnitude
+                if score > bestScore then best, bestScore = plr, score end
+            end
+        end
+    end
+    return best
+end
+
+local function ThrowKnife()
+    if ThrowBusy then return end
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local myHrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and myHrp and hum.Health > 0) then return end
+    if not HasKnife() then
+        Notify("โยนมีดไม่ได้", "คุณไม่มีมีด (ต้องเป็น Murderer)")
+        return
+    end
+    ThrowBusy = true
+    local plr = PickThrowTarget(myHrp.Position)
+    local vChar = plr and plr.Character
+    local vHrp = vChar and vChar:FindFirstChild("HumanoidRootPart")
+    if not vHrp then
+        Notify("โยนมีดไม่ได้", "ไม่พบผู้เล่นเป้าหมาย")
+        ThrowBusy = false
+        return
+    end
+    local knife = GetKnife(char, hum)
+    -- หา Remote โยนมีด: ค้นทุกลูกของมีดที่เป็น RemoteEvent และชื่อมีคำว่า throw
+    local remote, names = nil, {}
+    if knife then
+        for _, d in ipairs(knife:GetDescendants()) do
+            if d:IsA("RemoteEvent") then
+                names[#names + 1] = d.Name
+                if not remote and string.find(string.lower(d.Name), "throw", 1, true) then remote = d end
+            end
+        end
+    end
+    if not remote then
+        Notify("โยนมีดไม่ได้", "ไม่พบ Remote โยนมีด | RemoteEvent ในมีด: " .. (#names > 0 and table.concat(names, ", ") or "ไม่มี"))
+        ThrowBusy = false
+        return
+    end
+    local tpl = KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
+    if tpl then
+        -- ใช้รูปแบบ args จริงที่เกมเคยส่ง แล้วเปลี่ยนจุดเริ่ม/เป้าหมายเป็น hitbox ของเหยื่อ
+        local args = RetargetKnife(table.pack(unpack(tpl, 1, tpl.n)), vChar, vHrp)
+        pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
+    else
+        -- ยังไม่เคยจับ args จากเกม: ลองรูปแบบที่พบบ่อยทีละแบบ
+        pcall(function() remote:FireServer(vHrp.CFrame, vHrp.Position) end)
+        pcall(function() remote:FireServer(vHrp.CFrame, vHrp.CFrame) end)
+    end
+    Notify("โยนมีด", "โยนไปที่ " .. plr.Name)
+    task.wait(0.3)
+    ThrowBusy = false
+end
+
 -- ============================================================
 -- Hook: จับรูปแบบ args จริงของเกม + Silent Aim
 -- ============================================================
@@ -976,6 +1049,9 @@ do
                             kind = "gun"
                         elseif par and par.Name == "Events" and par.Parent and par.Parent.Name == "Knife" then
                             kind, rname = "knife", nm
+                        elseif string.find(string.lower(nm), "throw", 1, true) and self:IsA("RemoteEvent")
+                            and (par and (par.Name == "Knife" or (par.Parent and par.Parent.Name == "Knife"))) then
+                            kind, rname = "knife", "ThrowRemote"
                         end
                     end)
 
@@ -1135,7 +1211,7 @@ end
 -- ปุ่มยิงเล็กลงเล็กน้อย / ปุ่มอื่นสั้นลง  เรียงลงมาทางขวาของจอ
 local ShootFloat = MakeFloat("SHOOT", 1.00, UDim2.new(1, -12, 0.30, 0), ShootMurderer, true)
 ModeFloat        = MakeFloat(ModeText(),       0.90, UDim2.new(1, -12, 0.42, 0), ToggleShootMode)
-local KillFloat  = MakeFloat("KILL ALL",       0.90, UDim2.new(1, -12, 0.54, 0), function() KillAll(false) end)
+local ThrowFloat = MakeFloat("THROW KNIFE",     0.90, UDim2.new(1, -12, 0.54, 0), ThrowKnife)
 local GunFloat   = MakeFloat("GRAB GUN",       0.90, UDim2.new(1, -12, 0.66, 0), GrabGun)
 RefreshFloat()
 
@@ -1505,6 +1581,7 @@ local Spec = {
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
         { "button", "หยุดฆ่า", nil, function() KillCancel = true end },
+        { "button", "โยนมีด (มีดวาปไปที่ hitbox)", "โยนมีดไปที่ผู้เล่นที่อยู่ใกล้แนวกล้องที่สุด", function() task.spawn(ThrowKnife) end },
         { "slider", "หน่วงต่อครั้ง (ms)", 100, 1000, 250, 50, function(v) S.KillDelay = v end },
         { "slider", "ลองซ้ำต่อเป้า (ครั้ง)", 1, 5, 3, 1, function(v) S.KillRetries = v end },
         { "toggle", "กลับตำแหน่งเดิมหลังเสร็จ", nil, true, function(v) S.KillReturn = v end },
@@ -1512,7 +1589,7 @@ local Spec = {
     { name = "ปุ่มลอย", icon = "mouse-pointer-click", items = {
         { "toggle", "ปุ่มลอย SHOOT (สี่เหลี่ยมเล็ก)", "กดแล้วยิงฆาตกรทันที", false, function(v) S.ShootBtn = v; ShootFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย MODE (สลับโหมดยิง)", "กดสลับ MODE 1: NORMAL / MODE 2: WALL ข้อความบนปุ่มบอกโหมดปัจจุบัน", false, function(v) S.ModeBtn = v; ModeFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย KILL ALL", nil, false, function(v) S.KillBtn = v; KillFloat.btn.Visible = v end },
+        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วโยนมีดไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย GRAB GUN", "ส่ง hitbox ไปแตะปืนดรอปที่ใกล้สุด ตัวละครไม่วาป", false, function(v) S.GunBtn = v; GunFloat.btn.Visible = v end },
         { "toggle", "ล็อกตำแหน่งปุ่มลอย", "กันลากโดนตอนกด (ขอบปุ่มเป็นสีเขียวและขึ้นป้าย LOCKED)", false, function(v) S.LockBtn = v; RefreshFloat() end },
         { "slider", "ขนาดปุ่มยิง (สี่เหลี่ยม)", 36, 110, 64, 2, function(v) S.ShootSize = v; RefreshFloat() end },
@@ -1531,6 +1608,7 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
+        { "toggle", "แจ้งเตือน (เปิด/ปิด)", "เปิด/ปิดข้อความแจ้งเตือนทั้งหมดของสคริปต์", true, function(v) S.Notify = v end },
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
         { "button", "ปิดสคริปต์ (Unload)", "ล้างทุกอย่างและคืนค่ากราฟิก", function() Unload() end },
     } },
