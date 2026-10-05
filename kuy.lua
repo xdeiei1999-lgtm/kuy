@@ -9,7 +9,6 @@
       - ฆาตกร: ฆ่าทั้งแมพ วาปไปหา hitbox ทีละคน
       - ฆาตกร: โยนมีด (มีดวาปไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด)
       - ปุ่มลอย: SHOOT / MODE / THROW (โยนมีด) / GRAB GUN (เก็บปืนที่ดรอป)
-      - เปิด/ปิดการแจ้งเตือนได้ (แท็บ อื่นๆ)
         ล็อกตำแหน่ง ปรับขนาด รีเซ็ตตำแหน่งได้
       - FPS Boost + Unlock FPS
 ]]
@@ -62,7 +61,6 @@ local S = {
     -- ปุ่มลอย
     ShootBtn = false, ModeBtn = false, ThrowBtn = false, GunBtn = false, LockBtn = false, BtnSize = 140, ShootSize = 64,
     -- ฆาตกร
-    Notify = true,    -- เปิด/ปิดการแจ้งเตือน
     KillDelay = 250, KillRetries = 3, KillReturn = true,
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
@@ -80,7 +78,6 @@ Gui.Parent = SafeParent()
 
 local WindRef, WindowObj = nil, nil
 local function Notify(title, content)
-    if not S.Notify then return end
     if WindRef then
         local ok = pcall(function()
             WindRef:Notify({ Title = title, Content = content, Duration = 3 })
@@ -982,7 +979,7 @@ local function PickThrowTarget(myPos)
 end
 
 local function ThrowKnife()
-    if ThrowBusy then return end
+    if ThrowBusy or KillRunning then return end
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local myHrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -992,42 +989,69 @@ local function ThrowKnife()
         return
     end
     ThrowBusy = true
+
     local plr = PickThrowTarget(myHrp.Position)
     local vChar = plr and plr.Character
     local vHrp = vChar and vChar:FindFirstChild("HumanoidRootPart")
-    if not vHrp then
-        Notify("โยนมีดไม่ได้", "ไม่พบผู้เล่นเป้าหมาย")
+    local knife = GetKnife(char, hum)
+    if not (vHrp and knife) then
+        Notify("โยนมีดไม่ได้", vHrp and "ถือมีดไม่ได้" or "ไม่พบผู้เล่นเป้าหมาย")
         ThrowBusy = false
         return
     end
-    local knife = GetKnife(char, hum)
-    -- หา Remote โยนมีด: ค้นทุกลูกของมีดที่เป็น RemoteEvent และชื่อมีคำว่า throw
-    local remote, names = nil, {}
-    if knife then
-        for _, d in ipairs(knife:GetDescendants()) do
-            if d:IsA("RemoteEvent") then
-                names[#names + 1] = d.Name
-                if not remote and string.find(string.lower(d.Name), "throw", 1, true) then remote = d end
-            end
+
+    local ev = knife:FindFirstChild("Events")
+    local handle = knife:FindFirstChild("Handle")
+    local startCF = myHrp.CFrame
+
+    -- หา Remote โยนมีด (ชื่อมีคำว่า throw) ในมีด
+    local remote
+    for _, d in ipairs(knife:GetDescendants()) do
+        if d:IsA("RemoteEvent") and string.find(string.lower(d.Name), "throw", 1, true) then
+            remote = d
+            break
         end
     end
-    if not remote then
-        Notify("โยนมีดไม่ได้", "ไม่พบ Remote โยนมีด | RemoteEvent ในมีด: " .. (#names > 0 and table.concat(names, ", ") or "ไม่มี"))
-        ThrowBusy = false
-        return
+
+    -- วาปไปติด hitbox ของเป้า (ห่าง 2 studs) ให้มีดอยู่ในระยะทันที
+    myHrp.CFrame = CFrame.lookAt((vHrp.CFrame * CFrame.new(0, 0, 2)).Position, vHrp.Position)
+    myHrp.AssemblyLinearVelocity = Vector3.zero
+
+    -- 1) ส่งคำสั่งโยนมีด ไปที่ hitbox ของเป้า
+    if remote then
+        local tpl = KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
+        if tpl then
+            local args = RetargetKnife(table.pack(unpack(tpl, 1, tpl.n)), vChar, vHrp)
+            pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
+        else
+            pcall(function() remote:FireServer(vHrp.CFrame, vHrp.Position) end)
+            pcall(function() remote:FireServer(vHrp.CFrame, vHrp.CFrame) end)
+        end
     end
-    local tpl = KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
-    if tpl then
-        -- ใช้รูปแบบ args จริงที่เกมเคยส่ง แล้วเปลี่ยนจุดเริ่ม/เป้าหมายเป็น hitbox ของเหยื่อ
-        local args = RetargetKnife(table.pack(unpack(tpl, 1, tpl.n)), vChar, vHrp)
-        pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
+
+    -- 2) ให้มีดแตะ hitbox ของเป้าทันที (วิธีเดียวกับ Kill All ที่ใช้ได้อยู่แล้ว)
+    pcall(FireKnife, ev, "KnifeStabbed", vChar, vHrp)
+    pcall(FireKnife, ev, "HandleTouched", vChar, vHrp)
+    if firetouchinterest and handle then
+        pcall(function()
+            firetouchinterest(handle, vHrp, 0)
+            firetouchinterest(handle, vHrp, 1)
+        end)
+    end
+
+    task.wait(0.15)
+    if S.KillReturn and myHrp.Parent then
+        myHrp.CFrame = startCF
+        myHrp.AssemblyLinearVelocity = Vector3.zero
+    end
+
+    local vh = vChar and vChar:FindFirstChildOfClass("Humanoid")
+    if (not vh) or vh.Health <= 0 then
+        Notify("โยนมีด", "โดน " .. plr.Name)
     else
-        -- ยังไม่เคยจับ args จากเกม: ลองรูปแบบที่พบบ่อยทีละแบบ
-        pcall(function() remote:FireServer(vHrp.CFrame, vHrp.Position) end)
-        pcall(function() remote:FireServer(vHrp.CFrame, vHrp.CFrame) end)
+        Notify("โยนมีด", "ส่งมีดไปที่ " .. plr.Name)
     end
-    Notify("โยนมีด", "โยนไปที่ " .. plr.Name)
-    task.wait(0.3)
+    task.wait(0.1)
     ThrowBusy = false
 end
 
@@ -1608,7 +1632,6 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
-        { "toggle", "แจ้งเตือน (เปิด/ปิด)", "เปิด/ปิดข้อความแจ้งเตือนทั้งหมดของสคริปต์", true, function(v) S.Notify = v end },
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
         { "button", "ปิดสคริปต์ (Unload)", "ล้างทุกอย่างและคืนค่ากราฟิก", function() Unload() end },
     } },
