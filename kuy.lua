@@ -1020,7 +1020,6 @@ local function ThrowKnife()
 
     local ev = knife:FindFirstChild("Events")
     local handle = knife:FindFirstChild("Handle")
-    local startCF = myHrp.CFrame
 
     -- Remote โยนมีดของเกม: Knife.Events.KnifeThrown (args: CFrame ต้นทาง, CFrame เป้าหมาย)
     local remote = ev and ev:FindFirstChild("KnifeThrown")
@@ -1033,8 +1032,13 @@ local function ThrowKnife()
             end
         end
     end
+    if not remote then
+        Notify("โยนมีดไม่ได้", "ไม่พบ Remote โยนมีด (KnifeThrown)")
+        ThrowBusy = false
+        return
+    end
 
-    -- เก็บมีดที่เกมสร้างตอนโยน (projectile) เพื่อดึงไปที่ hitbox ของเป้า ทะลุแมพ
+    -- เก็บมีดที่เกมสร้างตอนโยน (projectile) เพื่อวาปไปที่ hitbox ของเป้า (ตัวละครเราไม่วาป)
     local projs = {}
     local pc = Workspace.DescendantAdded:Connect(function(d)
         pcall(function()
@@ -1045,19 +1049,12 @@ local function ThrowKnife()
         end)
     end)
 
-    local function Behind()
-        return CFrame.lookAt((vHrp.CFrame * CFrame.new(0, 0, 2)).Position, vHrp.Position)
-    end
-
-    myHrp.CFrame = Behind()
-    myHrp.AssemblyLinearVelocity = Vector3.zero
-
-    -- โยนมีด: ต้นทางวางติด hitbox ของเป้า (ไม่มีกำแพงคั่น) เป้าหมายคือกลาง hitbox
+    -- โยนมีด: ต้นทางของมีดอยู่ติด hitbox ของเป้า (ห่างแค่ ~1.5 studs ไม่มีกำแพงคั่น)
+    -- เป้าหมายคือกลาง hitbox  ตัวละครเราอยู่ที่เดิม
     local function FireThrow()
-        if not (remote and vHrp.Parent) then return end
+        if not vHrp.Parent then return end
         local target = vHrp.Position
-        -- ต้นทางอยู่ที่ตัวเราซึ่งวาปมาติดเป้าแล้ว (เซิร์ฟเวอร์เห็นว่ามีดออกจากตัวเราจริง)
-        local origin = myHrp.Position + Vector3.new(0, 1, 0)
+        local origin = (vHrp.CFrame * CFrame.new(0, 0.5, 1.5)).Position
         local tpl = KnifeTpl["KnifeThrown"] or KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
         local args
         if tpl then
@@ -1068,16 +1065,13 @@ local function ThrowKnife()
         end
         pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
     end
-    task.wait(0.15)   -- รอให้ตำแหน่งใหม่ของเราส่งถึงเซิร์ฟเวอร์ก่อนโยน
     FireThrow()
 
-    -- ล็อกตาม: ช่วงสั้นๆ ตามเป้าไปทุกก้าว ดึงมีดที่โยนไปติด hitbox และยิงสัมผัสซ้ำ
+    -- ตามเป้าช่วงสั้นๆ: ดึงมีดที่โยนไปติด hitbox ทุกก้าว และให้มีดแตะ hitbox ซ้ำ
     local vHum = vChar:FindFirstChildOfClass("Humanoid")
     for step = 1, 10 do
-        if not Alive or not (vHrp.Parent and myHrp.Parent) then break end
+        if not Alive or not vHrp.Parent then break end
         if vHum and vHum.Health <= 0 then break end
-        myHrp.CFrame = Behind()
-        myHrp.AssemblyLinearVelocity = Vector3.zero
         for _, part in ipairs(projs) do
             if part.Parent then
                 pcall(function()
@@ -1101,11 +1095,6 @@ local function ThrowKnife()
         task.wait(0.07)
     end
     pc:Disconnect()
-
-    if S.KillReturn and myHrp.Parent then
-        myHrp.CFrame = startCF
-        myHrp.AssemblyLinearVelocity = Vector3.zero
-    end
 
     if (not vHum) or vHum.Health <= 0 then
         Notify("โยนมีด", "โดน " .. plr.Name)
@@ -1676,7 +1665,7 @@ local Spec = {
     { name = "ปุ่มลอย", icon = "mouse-pointer-click", items = {
         { "toggle", "ปุ่มลอย SHOOT (สี่เหลี่ยมเล็ก)", "กดแล้วยิงฆาตกรทันที", false, function(v) S.ShootBtn = v; ShootFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย MODE (สลับโหมดยิง)", "กดสลับ MODE 1: NORMAL / MODE 2: WALL ข้อความบนปุ่มบอกโหมดปัจจุบัน", false, function(v) S.ModeBtn = v; ModeFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วล็อกคนที่เล็งใกล้สุด โยนมีดทะลุแมพไปที่ hitbox (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
+        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วล็อกคนที่เล็งใกล้สุด มีดวาปไปที่ hitbox ตัวละครไม่วาป (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย GRAB GUN", "ส่ง hitbox ไปแตะปืนดรอปที่ใกล้สุด ตัวละครไม่วาป", false, function(v) S.GunBtn = v; GunFloat.btn.Visible = v end },
         { "toggle", "ล็อกตำแหน่งปุ่มลอย", "กันลากโดนตอนกด (ขอบปุ่มเป็นสีเขียวและขึ้นป้าย LOCKED)", false, function(v) S.LockBtn = v; RefreshFloat() end },
         { "slider", "ขนาดปุ่มยิง (สี่เหลี่ยม)", 36, 110, 64, 2, function(v) S.ShootSize = v; RefreshFloat() end },
