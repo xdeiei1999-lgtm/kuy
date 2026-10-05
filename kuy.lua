@@ -961,6 +961,19 @@ end
 
 -- โยนมีด: เลือกผู้เล่นที่อยู่ใกล้แนวกล้องที่สุด แล้วส่งมีดไปที่ hitbox
 local ThrowBusy = false
+local ThrowLock = nil      -- ผู้เล่นที่ล็อกเป้าไว้ (มีดทุกลูกไปหาคนนี้จนกว่าจะตาย/ออก/ปลดล็อก)
+local ThrowFloat = nil
+
+local function UpdateThrowText()
+    if ThrowFloat then
+        ThrowFloat.btn.Text = ThrowLock and ("THROW > " .. ThrowLock.Name) or "THROW KNIFE"
+    end
+end
+
+local function SetThrowLock(plr)
+    ThrowLock = plr
+    UpdateThrowText()
+end
 local function PickThrowTarget(myPos)
     local cam = Workspace.CurrentCamera
     local look = cam and cam.CFrame.LookVector
@@ -990,7 +1003,12 @@ local function ThrowKnife()
     end
     ThrowBusy = true
 
-    local plr = PickThrowTarget(myHrp.Position)
+    -- ล็อกเป้า: ถ้ามีเป้าที่ล็อกไว้และยังอยู่/ยังไม่ตาย ใช้คนเดิม ไม่งั้นเลือกใหม่แล้วล็อก
+    if ThrowLock and not (ThrowLock.Parent and IsAlive(ThrowLock) and GetRole(ThrowLock) ~= "Dead") then
+        SetThrowLock(nil)
+    end
+    if not ThrowLock then SetThrowLock(PickThrowTarget(myHrp.Position)) end
+    local plr = ThrowLock
     local vChar = plr and plr.Character
     local vHrp = vChar and vChar:FindFirstChild("HumanoidRootPart")
     local knife = GetKnife(char, hum)
@@ -1004,7 +1022,6 @@ local function ThrowKnife()
     local handle = knife:FindFirstChild("Handle")
     local startCF = myHrp.CFrame
 
-    -- หา Remote โยนมีด (ชื่อมีคำว่า throw) ในมีด
     local remote
     for _, d in ipairs(knife:GetDescendants()) do
         if d:IsA("RemoteEvent") and string.find(string.lower(d.Name), "throw", 1, true) then
@@ -1013,11 +1030,25 @@ local function ThrowKnife()
         end
     end
 
-    -- วาปไปติด hitbox ของเป้า (ห่าง 2 studs) ให้มีดอยู่ในระยะทันที
-    myHrp.CFrame = CFrame.lookAt((vHrp.CFrame * CFrame.new(0, 0, 2)).Position, vHrp.Position)
+    -- เก็บมีดที่เกมสร้างตอนโยน (projectile) เพื่อดึงไปที่ hitbox ของเป้า ทะลุแมพ
+    local projs = {}
+    local pc = Workspace.DescendantAdded:Connect(function(d)
+        pcall(function()
+            if d:IsA("BasePart") and string.find(string.lower(d.Name), "knife", 1, true) then
+                local m = d:FindFirstAncestorOfClass("Model")
+                if not (m and Players:GetPlayerFromCharacter(m)) then projs[#projs + 1] = d end
+            end
+        end)
+    end)
+
+    local function Behind()
+        return CFrame.lookAt((vHrp.CFrame * CFrame.new(0, 0, 2)).Position, vHrp.Position)
+    end
+
+    myHrp.CFrame = Behind()
     myHrp.AssemblyLinearVelocity = Vector3.zero
 
-    -- 1) ส่งคำสั่งโยนมีด ไปที่ hitbox ของเป้า
+    -- โยนมีดไปที่ hitbox ของเป้า
     if remote then
         local tpl = KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
         if tpl then
@@ -1029,27 +1060,46 @@ local function ThrowKnife()
         end
     end
 
-    -- 2) ให้มีดแตะ hitbox ของเป้าทันที (วิธีเดียวกับ Kill All ที่ใช้ได้อยู่แล้ว)
-    pcall(FireKnife, ev, "KnifeStabbed", vChar, vHrp)
-    pcall(FireKnife, ev, "HandleTouched", vChar, vHrp)
-    if firetouchinterest and handle then
-        pcall(function()
-            firetouchinterest(handle, vHrp, 0)
-            firetouchinterest(handle, vHrp, 1)
-        end)
+    -- ล็อกตาม: ช่วงสั้นๆ ตามเป้าไปทุกก้าว ดึงมีดที่โยนไปติด hitbox และยิงสัมผัสซ้ำ
+    local vHum = vChar:FindFirstChildOfClass("Humanoid")
+    for step = 1, 10 do
+        if not Alive or not (vHrp.Parent and myHrp.Parent) then break end
+        if vHum and vHum.Health <= 0 then break end
+        myHrp.CFrame = Behind()
+        myHrp.AssemblyLinearVelocity = Vector3.zero
+        for _, part in ipairs(projs) do
+            if part.Parent then
+                pcall(function()
+                    part.CanCollide = false
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.CFrame = vHrp.CFrame
+                end)
+            end
+        end
+        if step % 3 == 1 then
+            pcall(FireKnife, ev, "KnifeStabbed", vChar, vHrp)
+            pcall(FireKnife, ev, "HandleTouched", vChar, vHrp)
+        end
+        if firetouchinterest and handle then
+            pcall(function()
+                firetouchinterest(handle, vHrp, 0)
+                firetouchinterest(handle, vHrp, 1)
+            end)
+        end
+        task.wait(0.07)
     end
+    pc:Disconnect()
 
-    task.wait(0.15)
     if S.KillReturn and myHrp.Parent then
         myHrp.CFrame = startCF
         myHrp.AssemblyLinearVelocity = Vector3.zero
     end
 
-    local vh = vChar and vChar:FindFirstChildOfClass("Humanoid")
-    if (not vh) or vh.Health <= 0 then
+    if (not vHum) or vHum.Health <= 0 then
         Notify("โยนมีด", "โดน " .. plr.Name)
+        SetThrowLock(nil)
     else
-        Notify("โยนมีด", "ส่งมีดไปที่ " .. plr.Name)
+        Notify("โยนมีด", "ล็อกเป้า " .. plr.Name .. " (กดอีกครั้งเพื่อโยนซ้ำ)")
     end
     task.wait(0.1)
     ThrowBusy = false
@@ -1235,7 +1285,7 @@ end
 -- ปุ่มยิงเล็กลงเล็กน้อย / ปุ่มอื่นสั้นลง  เรียงลงมาทางขวาของจอ
 local ShootFloat = MakeFloat("SHOOT", 1.00, UDim2.new(1, -12, 0.30, 0), ShootMurderer, true)
 ModeFloat        = MakeFloat(ModeText(),       0.90, UDim2.new(1, -12, 0.42, 0), ToggleShootMode)
-local ThrowFloat = MakeFloat("THROW KNIFE",     0.90, UDim2.new(1, -12, 0.54, 0), ThrowKnife)
+ThrowFloat = MakeFloat("THROW KNIFE",     0.90, UDim2.new(1, -12, 0.54, 0), ThrowKnife)
 local GunFloat   = MakeFloat("GRAB GUN",       0.90, UDim2.new(1, -12, 0.66, 0), GrabGun)
 RefreshFloat()
 
@@ -1605,6 +1655,7 @@ local Spec = {
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
         { "button", "หยุดฆ่า", nil, function() KillCancel = true end },
+        { "button", "ปลดล็อกเป้าโยนมีด", "ล้างเป้าที่ล็อกไว้ ครั้งต่อไปจะเลือกคนใกล้แนวกล้องใหม่", function() SetThrowLock(nil) end },
         { "button", "โยนมีด (มีดวาปไปที่ hitbox)", "โยนมีดไปที่ผู้เล่นที่อยู่ใกล้แนวกล้องที่สุด", function() task.spawn(ThrowKnife) end },
         { "slider", "หน่วงต่อครั้ง (ms)", 100, 1000, 250, 50, function(v) S.KillDelay = v end },
         { "slider", "ลองซ้ำต่อเป้า (ครั้ง)", 1, 5, 3, 1, function(v) S.KillRetries = v end },
@@ -1613,7 +1664,7 @@ local Spec = {
     { name = "ปุ่มลอย", icon = "mouse-pointer-click", items = {
         { "toggle", "ปุ่มลอย SHOOT (สี่เหลี่ยมเล็ก)", "กดแล้วยิงฆาตกรทันที", false, function(v) S.ShootBtn = v; ShootFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย MODE (สลับโหมดยิง)", "กดสลับ MODE 1: NORMAL / MODE 2: WALL ข้อความบนปุ่มบอกโหมดปัจจุบัน", false, function(v) S.ModeBtn = v; ModeFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วโยนมีดไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
+        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วล็อกคนที่เล็งใกล้สุด โยนมีดทะลุแมพไปที่ hitbox (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
         { "toggle", "ปุ่มลอย GRAB GUN", "ส่ง hitbox ไปแตะปืนดรอปที่ใกล้สุด ตัวละครไม่วาป", false, function(v) S.GunBtn = v; GunFloat.btn.Visible = v end },
         { "toggle", "ล็อกตำแหน่งปุ่มลอย", "กันลากโดนตอนกด (ขอบปุ่มเป็นสีเขียวและขึ้นป้าย LOCKED)", false, function(v) S.LockBtn = v; RefreshFloat() end },
         { "slider", "ขนาดปุ่มยิง (สี่เหลี่ยม)", 36, 110, 64, 2, function(v) S.ShootSize = v; RefreshFloat() end },
