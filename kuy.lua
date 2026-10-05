@@ -1056,7 +1056,8 @@ local function ThrowKnife()
     local function FireThrow()
         if not (remote and vHrp.Parent) then return end
         local target = vHrp.Position
-        local origin = (vHrp.CFrame * CFrame.new(0, 0.5, 2)).Position
+        -- ต้นทางอยู่ที่ตัวเราซึ่งวาปมาติดเป้าแล้ว (เซิร์ฟเวอร์เห็นว่ามีดออกจากตัวเราจริง)
+        local origin = myHrp.Position + Vector3.new(0, 1, 0)
         local tpl = KnifeTpl["KnifeThrown"] or KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
         local args
         if tpl then
@@ -1067,6 +1068,7 @@ local function ThrowKnife()
         end
         pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
     end
+    task.wait(0.15)   -- รอให้ตำแหน่งใหม่ของเราส่งถึงเซิร์ฟเวอร์ก่อนโยน
     FireThrow()
 
     -- ล็อกตาม: ช่วงสั้นๆ ตามเป้าไปทุกก้าว ดึงมีดที่โยนไปติด hitbox และยิงสัมผัสซ้ำ
