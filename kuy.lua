@@ -1022,11 +1022,15 @@ local function ThrowKnife()
     local handle = knife:FindFirstChild("Handle")
     local startCF = myHrp.CFrame
 
-    local remote
-    for _, d in ipairs(knife:GetDescendants()) do
-        if d:IsA("RemoteEvent") and string.find(string.lower(d.Name), "throw", 1, true) then
-            remote = d
-            break
+    -- Remote โยนมีดของเกม: Knife.Events.KnifeThrown (args: CFrame ต้นทาง, CFrame เป้าหมาย)
+    local remote = ev and ev:FindFirstChild("KnifeThrown")
+    if not (remote and remote:IsA("RemoteEvent")) then
+        remote = nil
+        for _, d in ipairs(knife:GetDescendants()) do
+            if d:IsA("RemoteEvent") and string.find(string.lower(d.Name), "throw", 1, true) then
+                remote = d
+                break
+            end
         end
     end
 
@@ -1048,17 +1052,22 @@ local function ThrowKnife()
     myHrp.CFrame = Behind()
     myHrp.AssemblyLinearVelocity = Vector3.zero
 
-    -- โยนมีดไปที่ hitbox ของเป้า
-    if remote then
-        local tpl = KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
+    -- โยนมีด: ต้นทางวางติด hitbox ของเป้า (ไม่มีกำแพงคั่น) เป้าหมายคือกลาง hitbox
+    local function FireThrow()
+        if not (remote and vHrp.Parent) then return end
+        local target = vHrp.Position
+        local origin = (vHrp.CFrame * CFrame.new(0, 0.5, 2)).Position
+        local tpl = KnifeTpl["KnifeThrown"] or KnifeTpl["ThrowRemote"] or KnifeTpl[remote.Name]
+        local args
         if tpl then
-            local args = RetargetKnife(table.pack(unpack(tpl, 1, tpl.n)), vChar, vHrp)
-            pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
-        else
-            pcall(function() remote:FireServer(vHrp.CFrame, vHrp.Position) end)
-            pcall(function() remote:FireServer(vHrp.CFrame, vHrp.CFrame) end)
+            args = Retarget(table.pack(unpack(tpl, 1, tpl.n)), origin, target)
         end
+        if not args then
+            args = table.pack(CFrame.lookAt(origin, target), CFrame.new(target))
+        end
+        pcall(function() remote:FireServer(unpack(args, 1, args.n)) end)
     end
+    FireThrow()
 
     -- ล็อกตาม: ช่วงสั้นๆ ตามเป้าไปทุกก้าว ดึงมีดที่โยนไปติด hitbox และยิงสัมผัสซ้ำ
     local vHum = vChar:FindFirstChildOfClass("Humanoid")
@@ -1076,6 +1085,7 @@ local function ThrowKnife()
                 end)
             end
         end
+        if step == 5 then FireThrow() end
         if step % 3 == 1 then
             pcall(FireKnife, ev, "KnifeStabbed", vChar, vHrp)
             pcall(FireKnife, ev, "HandleTouched", vChar, vHrp)
