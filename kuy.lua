@@ -10,7 +10,7 @@
       - ฆาตกร: โยนมีด (มีดวาปไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด)
       - ปุ่มลอย: SHOOT / MODE / THROW (โยนมีด) / GRAB GUN (เก็บปืนที่ดรอป)
         ล็อกตำแหน่ง ปรับขนาด รีเซ็ตตำแหน่งได้
-      - FPS Boost + Unlock FPS
+      - FPS Boost (ลบ texture/เสื้อผ้า/เอฟเฟกต์ ตัวละครและพื้นเป็นสีเทา)
 ]]
 
 local env = (getgenv and getgenv()) or _G
@@ -56,7 +56,7 @@ local MODE_2 = "โหมด 2: ยิงทะลุ (กระสุนวา�
 local S = {
     ESP = false,
     -- มือปืน
-    SilentAim = false, ShootMode = MODE_1, AimPart = "Torso",
+    ShootMode = MODE_1, AimPart = "Torso",
     ArgMode = "CFrame, CFrame",
     -- ปุ่มลอย
     ShootBtn = false, ModeBtn = false, ThrowBtn = false, GunBtn = false, LockBtn = false, BtnSize = 140, ShootSize = 64,
@@ -1171,7 +1171,7 @@ local function ThrowKnife()
 end
 
 -- ============================================================
--- Hook: จับรูปแบบ args จริงของเกม + Silent Aim
+-- Hook: จับรูปแบบ args จริงของเกม
 -- ============================================================
 local HookOK = false
 do
@@ -1195,23 +1195,7 @@ do
                     end)
 
                     if kind == "gun" then
-                        local args = table.pack(...)
                         S.GunTpl = table.pack(...)
-                        if S.SilentAim then
-                            local newArgs = nil
-                            pcall(function()
-                                local tgt = GetMurderer()
-                                local myHrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                                if tgt and myHrp then
-                                    local origin, p = ComputeShot(tgt, myHrp)
-                                    if p then newArgs = Retarget(args, origin, p) end
-                                end
-                            end)
-                            if newArgs then
-                                if setnamecallmethod then setnamecallmethod(method) end
-                                return old(self, unpack(newArgs, 1, newArgs.n))
-                            end
-                        end
                     elseif kind == "knife" then
                         KnifeTpl[rname] = table.pack(...)
                     end
@@ -1355,17 +1339,22 @@ local GunFloat   = MakeFloat("GRAB GUN",       0.90, UDim2.new(1, -12, 0.66, 0),
 RefreshFloat()
 
 -- ============================================================
--- FPS Boost (สวิตช์เดียว ลดทุกอย่างที่กิน FPS ในครั้งเดียว)
---   แมพ     : วัสดุเรียบ, ปิดเงา, ซ่อน Decal/Texture, ล้างเท็กซ์เจอร์ Mesh,
---             RenderFidelity ต่ำสุด, ปิด Particle/Trail/Beam และไฟ (Point/Spot/Surface)
---   แสงโลก  : ปิดเงาโลก, ปิด PostEffect ทุกตัว, หมอก/เมฆ/หญ้า/คลื่นน้ำ, แสงสะท้อนสิ่งแวดล้อม
---   ผู้เล่น : ซ่อนหมวก/เครื่องแต่งตัวและเงาของผู้เล่นอื่น (ESP ยังเห็นปกติ)
---   เรนเดอร์: Quality ต่ำสุด, MeshPart detail ต่ำสุด, ปลดล็อก FPS cap
+-- FPS Boost (สวิตช์เดียว)
+--   แมพ     : วัสดุเรียบ, ปิดเงา, ลบ Decal/Texture/SurfaceAppearance/Mesh texture,
+--             ปิด Particle/Trail/Beam/ไฟ/Highlight และเอฟเฟกต์ทั้งหมด
+--   พื้น    : พื้นแมพ + Terrain เป็นสีเทา
+--   ตัวละคร : ทุกคน (รวมตัวเรา) ไม่มีเสื้อผ้า/เครื่องแต่งตัว/หน้า และเป็นสีเทาทั้งตัว
+--   แสงโลก  : ปิดเงาโลก, ปิด PostEffect ทุกตัว, หมอก/เมฆ/หญ้า/คลื่นน้ำ
+--   เรนเดอร์: Quality ต่ำสุด, MeshPart detail ต่ำสุด
 -- ============================================================
+local GRAY = Color3.fromRGB(128, 128, 128)
+local GRAY_FLOOR = Color3.fromRGB(110, 110, 110)
+
 local FPS = {
     on = false,
     orig = setmetatable({}, { __mode = "k" }),   -- ค่าเดิมของแต่ละ Instance
     light = {},                                   -- ค่าเดิมของ Lighting/Terrain/อื่นๆ
+    terrain = nil,                                -- สีเดิมของวัสดุ Terrain
     render = nil,
     token = 0,
     conn = nil,
@@ -1398,51 +1387,81 @@ local function RSet(inst, prop, val)
     pcall(function() inst[prop] = val end)
 end
 
+local function IsFloorPart(inst)
+    local sz = inst.Size
+    local flat = math.min(sz.X, sz.Z)
+    return sz.Y <= 6 and flat >= 6 and sz.Y <= flat * 0.5
+end
+
 local function ApplyInst(inst)
     if not FPS.on then return end
 
-    -- เอฟเฟกต์และไฟ: กินแรงที่สุด
+    -- เอฟเฟกต์ทั้งหมด + ไฟ
     if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
         or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles")
         or inst:IsA("Light") or inst:IsA("Highlight")
-        or inst:IsA("BillboardGui") or inst:IsA("SurfaceGui") then
+        or inst:IsA("BillboardGui") or inst:IsA("SurfaceGui")
+        or inst:IsA("PostEffect") or inst:IsA("Atmosphere") then
         RSet(inst, "Enabled", false)
         return
     end
 
-    -- เอฟเฟกต์เล็กๆ: ระเบิด / โล่ ForceField / กรอบเลือกของเกม
     if inst:IsA("Explosion") or inst:IsA("ForceField")
         or inst:IsA("SelectionBox") or inst:IsA("SelectionSphere") then
         RSet(inst, "Visible", false)
         return
     end
 
-    if inst:IsA("Decal") or inst:IsA("Texture") then
-        if CharOwner(inst) ~= LP then RSet(inst, "Transparency", 1) end
+    -- เสื้อผ้าและของแต่งตัวตัวละคร
+    if inst:IsA("Shirt") then RSet(inst, "ShirtTemplate", ""); return end
+    if inst:IsA("Pants") then RSet(inst, "PantsTemplate", ""); return end
+    if inst:IsA("ShirtGraphic") then RSet(inst, "Graphic", ""); return end
+    if inst:IsA("CharacterMesh") then RSet(inst, "MeshId", ""); RSet(inst, "OverlayTextureId", ""); return end
+    if inst:IsA("BodyColors") then
+        for _, prop in ipairs({ "HeadColor3", "TorsoColor3", "LeftArmColor3", "RightArmColor3", "LeftLegColor3", "RightLegColor3" }) do
+            RSet(inst, prop, GRAY)
+        end
         return
     end
 
+    -- Texture ทุกชนิด
+    if inst:IsA("Decal") or inst:IsA("Texture") then
+        RSet(inst, "Transparency", 1)
+        return
+    end
+    if inst:IsA("SurfaceAppearance") then
+        RSet(inst, "ColorMap", ""); RSet(inst, "NormalMap", "")
+        RSet(inst, "MetalnessMap", ""); RSet(inst, "RoughnessMap", "")
+        return
+    end
     if inst:IsA("SpecialMesh") then
-        if CharOwner(inst) ~= LP then RSet(inst, "TextureId", "") end
+        RSet(inst, "TextureId", "")
         return
     end
 
     if inst:IsA("BasePart") then
+        if inst:IsA("Terrain") then return end
         local owner = CharOwner(inst)
         if owner then
-            -- ผู้เล่นคนอื่น: ปิดเงา + ซ่อนเครื่องแต่งตัว (ตัวเราไม่แตะ)
-            if owner ~= LP then
-                RSet(inst, "CastShadow", false)
-                if inst.Parent and inst.Parent:IsA("Accessory") then
-                    RSet(inst, "Transparency", 1)
-                end
+            -- ตัวละครทุกคน: สีเทา ไม่มีเงา ซ่อนเครื่องแต่งตัว
+            RSet(inst, "CastShadow", false)
+            RSet(inst, "Material", Enum.Material.SmoothPlastic)
+            RSet(inst, "Reflectance", 0)
+            if inst.Parent and inst.Parent:IsA("Accessory") then
+                RSet(inst, "Transparency", 1)
+            else
+                RSet(inst, "Color", GRAY)
+            end
+            if inst:IsA("MeshPart") then
+                RSet(inst, "TextureID", "")
+                RSet(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
             end
             return
         end
-        if inst:IsA("Terrain") then return end
         RSet(inst, "Material", Enum.Material.SmoothPlastic)
         RSet(inst, "Reflectance", 0)
         RSet(inst, "CastShadow", false)
+        if IsFloorPart(inst) then RSet(inst, "Color", GRAY_FLOOR) end
         if inst:IsA("MeshPart") then
             RSet(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
             RSet(inst, "TextureID", "")
@@ -1489,6 +1508,15 @@ local function LRestore()
         end
     end
     FPS.light = {}
+    if FPS.terrain then
+        local terrain = Workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            for m, c in pairs(FPS.terrain) do
+                pcall(function() terrain:SetMaterialColor(m, c) end)
+            end
+        end
+        FPS.terrain = nil
+    end
 end
 
 local function ApplyRender()
@@ -1545,6 +1573,16 @@ local function ApplyGlobal()
         LSet(terrain, "WaterReflectance", 0)
         local clouds = terrain:FindFirstChildOfClass("Clouds")
         if clouds then LSet(clouds, "Enabled", false) end
+        -- พื้น Terrain เป็นสีเทา
+        if not FPS.terrain then
+            FPS.terrain = {}
+            for _, m in ipairs(Enum.Material:GetEnumItems()) do
+                pcall(function()
+                    FPS.terrain[m] = terrain:GetMaterialColor(m)
+                    terrain:SetMaterialColor(m, GRAY_FLOOR)
+                end)
+            end
+        end
     end
 
     ApplyRender()
@@ -1568,66 +1606,6 @@ local function RefreshFPS()
         end
     end)
 end
-
--- ============================================================
--- Unlock FPS: ปลดเพดาน FPS ให้สูงสุด
---   setfpscap + FFlag (DFIntTaskSchedulerTargetFps) + ปิดตัวลดเฟรมเรตอัตโนมัติ
---   ย้ำค่าซ้ำทุก 5 วินาที เพราะ Roblox ชอบรีเซ็ตเพดานตอนสลับหน้าต่าง
--- ============================================================
-local Unlock = { on = false, cap = 360, flagOrig = nil, frmOrig = nil }
-
-local function UnlockTarget()
-    if Unlock.cap >= 1000 then return 9999 end
-    return Unlock.cap
-end
-
-local function ApplyUnlock()
-    local n = UnlockTarget()
-    if setfpscap then pcall(setfpscap, n) end
-    if setfflag then
-        if Unlock.flagOrig == nil and getfflag then
-            pcall(function() Unlock.flagOrig = getfflag("DFIntTaskSchedulerTargetFps") end)
-        end
-        pcall(setfflag, "DFIntTaskSchedulerTargetFps", tostring(n))
-    end
-    pcall(function()
-        local r = settings().Rendering
-        if Unlock.frmOrig == nil then Unlock.frmOrig = r.FrameRateManager end
-        r.FrameRateManager = Enum.FramerateManagerMode.Off
-    end)
-end
-
-local function ReleaseUnlock()
-    if setfpscap then pcall(setfpscap, 60) end
-    if setfflag then
-        local orig = (Unlock.flagOrig ~= nil and Unlock.flagOrig ~= "") and tostring(Unlock.flagOrig) or "60"
-        pcall(setfflag, "DFIntTaskSchedulerTargetFps", orig)
-    end
-    if Unlock.frmOrig ~= nil then
-        local saved = Unlock.frmOrig
-        Unlock.frmOrig = nil
-        pcall(function() settings().Rendering.FrameRateManager = saved end)
-    end
-end
-
-local function SetUnlock(v)
-    Unlock.on = v
-    if v then
-        if not (setfpscap or setfflag) then
-            Notify("Unlock FPS", "executor นี้ไม่รองรับ setfpscap / setfflag")
-        end
-        ApplyUnlock()
-    else
-        ReleaseUnlock()
-    end
-end
-
-task.spawn(function()
-    while Alive do
-        task.wait(5)
-        if Unlock.on then pcall(ApplyUnlock) end
-    end
-end)
 
 local FpsLabel = Instance.new("TextLabel")
 FpsLabel.Name = RName()
@@ -1662,13 +1640,11 @@ end
 local function Unload()
     Alive = false
     KillCancel = true
-    S.SilentAim, S.ESP = false, false
+    S.ESP = false
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
     DestroyAllESP()
     ClearDropESP()
     FPS.on = false
-    Unlock.on = false
-    ReleaseUnlock()
     FPS.token = FPS.token + 1
     if FPS.conn then FPS.conn:Disconnect(); FPS.conn = nil end
     RestoreRecords()
@@ -1712,7 +1688,6 @@ local Spec = {
     } },
     { name = "มือปืน", icon = "crosshair", items = {
         { "button", "สลับโหมดยิง (โหมด 1 / โหมด 2)", "โหมด 1 ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง) / โหมด 2 ยิงทะลุกำแพง", ToggleShootMode },
-        { "toggle", "Silent Aim (ปุ่มยิงปกติของเกม)", "กดยิงตามปกติ กระสุนถูกเปลี่ยนไปที่ hitbox ฆาตกร", false, function(v) S.SilentAim = v end },
         { "dropdown", "จุดเล็ง", { "Torso", "Head" }, "Torso", function(v) S.AimPart = v end },
         { "dropdown", "รูปแบบ args (ใช้เมื่อยังไม่เคยยิงเอง)", { "CFrame, CFrame", "Vector3 (เป้า)", "Vector3 (ต้นทาง, เป้า)" }, "CFrame, CFrame", function(v) S.ArgMode = v end },
         { "button", "ยิงฆาตกรทันที", nil, function() task.spawn(ShootMurderer) end },
@@ -1739,12 +1714,7 @@ local Spec = {
         end },
     } },
     { name = "FPS", icon = "zap", items = {
-        { "toggle", "FPS Boost (สุดแรง)", "ลดกราฟิกแมพ ปิดเงา/แสง/เอฟเฟกต์เล็กๆ ซ่อนเครื่องแต่งตัวผู้เล่นอื่น", false, function(v) FPS.on = v; RefreshFPS() end },
-        { "toggle", "Unlock FPS (ปลดเพดาน FPS)", "ปลดเพดาน 60 FPS ด้วย setfpscap + FFlag + ปิดตัวลดเฟรมเรตอัตโนมัติ", false, function(v) SetUnlock(v) end },
-        { "slider", "FPS สูงสุด (1000 = ไม่จำกัด)", 60, 1000, 360, 20, function(v)
-            Unlock.cap = v
-            if Unlock.on then ApplyUnlock() end
-        end },
+        { "toggle", "FPS Boost (สุดแรง)", "ลบ texture/เสื้อผ้า/เอฟเฟกต์ทั้งหมด ตัวละครทุกคนและพื้นเป็นสีเทา ปิดเงา/แสง", false, function(v) FPS.on = v; RefreshFPS() end },
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
