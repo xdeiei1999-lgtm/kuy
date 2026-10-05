@@ -534,7 +534,7 @@ Connect(RunService.Heartbeat, function(dt)
                 if rec then
                     local v = (pos - rec.pos) / dt
                     if v.Magnitude > 120 then v = Vector3.zero end   -- วาป / รีสปอว์น
-                    rec.vel = rec.vel:Lerp(v, 0.35)
+                    rec.vel = rec.vel:Lerp(v, 0.6)
                     rec.pos = pos
                 else
                     VelTrack[plr] = { pos = pos, vel = Vector3.zero }
@@ -587,6 +587,8 @@ end
 
 -- เช็คว่ากระสุน from -> to จะโดนตัวผู้เล่นคนอื่น (ที่ไม่ใช่ฆาตกร/ตัวเรา) หรือไม่
 -- รวมถึงกรณีต้นทางหรือจุดเล็งอยู่ในตัวคนอื่นด้วย
+local ShotTry = 0   -- นัดที่เท่าไรของการกดยิงรอบนี้ (ใช้หมุนจุดเล็งเมื่อพลาด)
+
 local function HitsOthers(fromPos, toPos, murdererChar)
     local list = {}
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -614,7 +616,7 @@ end
 local function NearOrigin(myPos, targetPos)
     local dir = myPos - targetPos
     if dir.Magnitude < 3 then return myPos end
-    return targetPos + dir.Unit * 2.0
+    return targetPos + dir.Unit * 1.5
 end
 
 -- คำนวณการยิง: คืน origin, point  (origin = nil แปลว่าใช้ต้นทางเดิมของเกม)
@@ -632,13 +634,23 @@ local function ComputeShot(target, myHrp)
 
     if S.ShootMode == MODE_2 then
         -- ทะลุ: เล็งกลาง hitbox + ชดเชย ping แต่จำกัดไม่เกิน 1 stud ให้จุดเล็งอยู่ในตัวเป้าเสมอ
-        local off2 = PredictOffset(target, char, ping + 0.03, 1.0)
+        local off2 = PredictOffset(target, char, ping + 0.05, 1.8)
         local pts = {}
         if S.AimPart == "Head" and head then pts[#pts + 1] = head.Position end
         pts[#pts + 1] = hrp.Position
         if torso then pts[#pts + 1] = torso.Position end
         if lower then pts[#pts + 1] = lower.Position end
         if head and S.AimPart ~= "Head" then pts[#pts + 1] = head.Position end
+
+        -- ถ้านัดก่อนพลาด หมุนจุดเล็งหลัก (กลางตัว/ลำตัว/ช่วงล่าง) เพื่อไม่ยิงเส้นเดิมซ้ำ
+        local n = math.min(#pts, 3)
+        local rot = ShotTry % n
+        if rot > 0 then
+            local r = {}
+            for i = 1, n do r[i] = pts[(i - 1 + rot) % n + 1] end
+            for i = n + 1, #pts do r[i] = pts[i] end
+            pts = r
+        end
 
         -- ลองจุดเล็งหลายจุด x ต้นทางหลายทิศรอบฆาตกร เลือกชุดแรกที่กระสุนไม่ผ่านตัวคนอื่นเลย
         local cf = hrp.CFrame
@@ -727,6 +739,7 @@ local function ShootMurderer()
         return
     end
 
+    ShotTry = 0
     local ok, why = FireShotOnce(shoot, target, myHrp)
     if not ok then
         if why == "blocked" then
@@ -739,8 +752,8 @@ local function ShootMurderer()
 
     -- เช็คผล: ถ้ายังไม่ตายใน 0.5 วิ ยิงซ้ำด้วยตำแหน่งล่าสุด (สูงสุด 2 ครั้ง ถ้าปืนยังอยู่ในมือ)
     task.spawn(function()
-        for _ = 1, 3 do
-            task.wait(0.5)
+        for _ = 1, 5 do
+            task.wait(0.4)
             if not Alive then return end
             local c = target.Character
             local h = c and c:FindFirstChildOfClass("Humanoid")
@@ -748,13 +761,14 @@ local function ShootMurderer()
                 Notify("ยิงโดน", "ฆาตกรตายแล้ว")
                 return
             end
-            if _ == 3 then return end
+            if _ == 5 then return end
             local ch = LP.Character
             local mh = ch and ch:FindFirstChild("HumanoidRootPart")
             local hm = ch and ch:FindFirstChildOfClass("Humanoid")
             local g = ch and ch:FindFirstChild("Gun")
             local sh = g and g:FindFirstChild("Shoot")
             if not (mh and hm and hm.Health > 0 and sh) then return end
+            ShotTry = ShotTry + 1
             FireShotOnce(sh, target, mh)
         end
     end)
