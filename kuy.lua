@@ -585,6 +585,31 @@ local function HasLineOfSight(fromPos, toPos)
     return result == nil
 end
 
+-- เช็คว่ากระสุน from -> to จะโดนตัวผู้เล่นคนอื่น (ที่ไม่ใช่ฆาตกร/ตัวเรา) หรือไม่
+-- รวมถึงกรณีต้นทางหรือจุดเล็งอยู่ในตัวคนอื่นด้วย
+local function HitsOthers(fromPos, toPos, murdererChar)
+    local list = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local c = plr.Character
+        if plr ~= LP and c and c ~= murdererChar then list[#list + 1] = c end
+    end
+    if #list == 0 then return false end
+
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Include
+    rp.FilterDescendantsInstances = list
+    if Workspace:Raycast(fromPos, toPos - fromPos, rp) then return true end
+
+    local op = OverlapParams.new()
+    op.FilterType = Enum.RaycastFilterType.Include
+    op.FilterDescendantsInstances = list
+    local okA, a = pcall(function() return Workspace:GetPartBoundsInRadius(fromPos, 0.8, op) end)
+    if okA and #a > 0 then return true end
+    local okB, b = pcall(function() return Workspace:GetPartBoundsInRadius(toPos, 0.5, op) end)
+    if okB and #b > 0 then return true end
+    return false
+end
+
 -- โหมด 2: วางต้นทางกระสุนห่างจาก hitbox แค่ ~2 studs (ไม่มีอะไรมาคั่น)
 local function NearOrigin(myPos, targetPos)
     local dir = myPos - targetPos
@@ -607,9 +632,32 @@ local function ComputeShot(target, myHrp)
 
     if S.ShootMode == MODE_2 then
         -- ทะลุ: เล็งกลาง hitbox + ชดเชย ping แต่จำกัดไม่เกิน 1 stud ให้จุดเล็งอยู่ในตัวเป้าเสมอ
-        local base = (S.AimPart == "Head" and head and head.Position) or hrp.Position
-        local p = base + PredictOffset(target, char, ping + 0.03, 1.0)
-        return NearOrigin(myHrp.Position, p), p
+        local off2 = PredictOffset(target, char, ping + 0.03, 1.0)
+        local pts = {}
+        if S.AimPart == "Head" and head then pts[#pts + 1] = head.Position end
+        pts[#pts + 1] = hrp.Position
+        if torso then pts[#pts + 1] = torso.Position end
+        if lower then pts[#pts + 1] = lower.Position end
+        if head and S.AimPart ~= "Head" then pts[#pts + 1] = head.Position end
+
+        -- ลองจุดเล็งหลายจุด x ต้นทางหลายทิศรอบฆาตกร เลือกชุดแรกที่กระสุนไม่ผ่านตัวคนอื่นเลย
+        local cf = hrp.CFrame
+        for _, base in ipairs(pts) do
+            local p = base + off2
+            local origins = {
+                NearOrigin(myHrp.Position, p),
+                p + Vector3.new(0, 3, 0),
+                (cf * CFrame.new(0, 0, -2.5)).Position,
+                (cf * CFrame.new(0, 0, 2.5)).Position,
+                (cf * CFrame.new(2.5, 0, 0)).Position,
+                (cf * CFrame.new(-2.5, 0, 0)).Position,
+                p + Vector3.new(0, 5, 0),
+            }
+            for _, o in ipairs(origins) do
+                if not HitsOthers(o, p, char) then return o, p end
+            end
+        end
+        return nil, nil, "crowded"
     end
 
     -- โหมด 1: ลองจุดต่างๆ ของตัว เลือกจุดแรกที่ไม่มีกำแพงบัง (เริ่มจากส่วนที่ hitbox ใหญ่สุด)
@@ -625,7 +673,7 @@ local function ComputeShot(target, myHrp)
     local eye = myHead and myHead.Position or myHrp.Position
     for _, c in ipairs(cands) do
         local p = c + off
-        if HasLineOfSight(eye, p) then return nil, p end
+        if HasLineOfSight(eye, p) and not HitsOthers(eye, p, char) then return nil, p end
     end
     return nil, nil, "blocked"
 end
@@ -682,7 +730,9 @@ local function ShootMurderer()
     local ok, why = FireShotOnce(shoot, target, myHrp)
     if not ok then
         if why == "blocked" then
-            Notify("ยิงไม่ได้ (โหมด 1)", "มีกำแพงบังทุกจุดของฆาตกร สลับเป็นโหมด 2 ถ้าต้องการยิงทะลุ")
+            Notify("ยิงไม่ได้ (โหมด 1)", "มีกำแพงหรือผู้เล่นคนอื่นบังทุกจุดของฆาตกร สลับเป็นโหมด 2 ถ้าต้องการยิงทะลุกำแพง")
+        elseif why == "crowded" then
+            Notify("ยิงไม่ได้ (โหมด 2)", "มีผู้เล่นคนอื่นรอบฆาตกรจนยิงโดนเฉพาะฆาตกรไม่ได้ ลองใหม่อีกครั้ง")
         end
         return
     end
