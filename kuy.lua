@@ -2088,12 +2088,32 @@ local function RenderWind(WindUI)
     if not ok or not Window then return false end
     WindowObj, WindRef = Window, WindUI
     pcall(function() Window:SetToggleKey(Enum.KeyCode.RightShift) end)
-    pcall(function()
-        Window:EditOpenButton({
-            Title = "NGO PORN HUB", Icon = "swords", CornerRadius = UDim.new(0, 16),
-            StrokeThickness = 2, Draggable = true,
-            Color = ColorSequence.new(Color3.fromRGB(48, 255, 106), Color3.fromRGB(231, 255, 47)),
-        })
+    -- Open button: rainbow colors that keep cycling
+    local function RainbowSeq(off)
+        local pts = {}
+        for i = 0, 5 do
+            local t = i / 5
+            pts[#pts + 1] = ColorSequenceKeypoint.new(t, Color3.fromHSV((off + t) % 1, 1, 1))
+        end
+        return ColorSequence.new(pts)
+    end
+    local function EditBtn(off)
+        pcall(function()
+            Window:EditOpenButton({
+                Title = "NGO PORN HUB", Icon = "swords", CornerRadius = UDim.new(0, 16),
+                StrokeThickness = 2, Draggable = true,
+                Color = RainbowSeq(off),
+            })
+        end)
+    end
+    EditBtn(0)
+    task.spawn(function()
+        local off = 0
+        while Alive and WindowObj == Window do
+            off = (off + 0.03) % 1
+            EditBtn(off)
+            task.wait(0.12)
+        end
     end)
 
     for _, tabSpec in ipairs(Spec) do
