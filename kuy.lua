@@ -1947,6 +1947,58 @@ local function Diag()
         drops)
 end
 
+-- ============================================================
+-- พื้นหลังเมนู: รูป 2 แบบ (เลือกได้ในแท็บ อื่นๆ)
+-- ============================================================
+-- พื้นหลัง 1 = Texture 14751314324 (ใช้เป็นรูปได้ตรงๆ)
+-- พื้นหลัง 2 = Asset (Decal) 14751314303 (ต้องแปลงเป็นรูปจริงก่อน ไม่งั้นรูปไม่ขึ้น)
+local BG_TEXTURE_ID = 14751314324
+local BG_ASSET_ID = 14751314303
+local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID }
+local BgAssetResolved = false
+local BG_ALPHA = 0.5          -- ความโปร่งใสของรูป (0 = ชัดสุด, 1 = มองไม่เห็น)
+local BgIndex = 1
+local FallbackBgImg = nil     -- ImageLabel ของเมนูสำรอง (ตั้งตอนสร้างเมนูสำรอง)
+
+-- แปลง Decal asset เป็น id รูปจริง (อ่านค่า Texture ของ Decal ผ่าน GetObjects)
+local function ResolveDecalImage(assetId)
+    local ok, res = pcall(function()
+        local objs = game:GetObjects("rbxassetid://" .. assetId)
+        for _, o in ipairs(objs) do
+            if o:IsA("Decal") or o:IsA("Texture") then return o.Texture end
+            local d = o:FindFirstChildWhichIsA("Decal", true) or o:FindFirstChildWhichIsA("Texture", true)
+            if d then return d.Texture end
+        end
+        return nil
+    end)
+    if ok and type(res) == "string" and res ~= "" then
+        local num = string.match(res, "id=(%d+)") or string.match(res, "rbxassetid://(%d+)")
+        if num then return "rbxassetid://" .. num end
+        return res
+    end
+    return nil
+end
+
+local function ApplyBackground(idx)
+    BgIndex = idx
+    -- พื้นหลัง 2 (Asset): แปลงเป็นรูปจริงครั้งแรกที่เลือก แล้วค่อยตั้งรูป
+    if idx == 2 and not BgAssetResolved then
+        BgAssetResolved = true
+        task.spawn(function()
+            local img = ResolveDecalImage(BG_ASSET_ID)
+            if img then BG_IDS[2] = img end
+            if BgIndex == 2 then ApplyBackground(2) end
+        end)
+    end
+    local id = BG_IDS[idx]
+    if not id then return end
+    if WindowObj then
+        pcall(function() WindowObj:SetBackgroundImage(id) end)
+        pcall(function() WindowObj:SetBackgroundImageTransparency(BG_ALPHA) end)
+    end
+    if FallbackBgImg then pcall(function() FallbackBgImg.Image = id end) end
+end
+
 local Spec = {
     { name = "ESP", icon = "eye", items = {
         { "toggle", "ESP (รวมทุกอย่าง)", "ผู้เล่นแยกบทบาท Murderer / Sheriff / Hero / Innocent พร้อมชื่อ ระยะ อาวุธที่ถือ + ปืนที่ดรอป", false, function(v)
@@ -2000,6 +2052,7 @@ local Spec = {
         { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปทั้งตัวละครและ hitbox ไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
+        { "dropdown", "พื้นหลังเมนู", { "พื้นหลัง 1", "พื้นหลัง 2" }, "พื้นหลัง 1", function(v) ApplyBackground(v == "พื้นหลัง 2" and 2 or 1) end },
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
         { "button", "ปิดสคริปต์ (Unload)", "ล้างทุกอย่างและคืนค่ากราฟิก", function() Unload() end },
     } },
@@ -2026,6 +2079,8 @@ local function RenderWind(WindUI)
             Folder = "MM2HubV10",
             Size = UDim2.fromOffset(580, 460),
             Theme = "Dark",
+            Background = BG_IDS[1],
+            BackgroundImageTransparency = BG_ALPHA,
             Resizable = true,
             HideSearchBar = true,
         })
@@ -2075,6 +2130,19 @@ local function RenderFallback()
     main.Draggable = true
     main.Parent = Gui
     local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0, 10); mc.Parent = main
+
+    -- พื้นหลังรูปของเมนูสำรอง (อยู่หลังปุ่มทั้งหมด)
+    local bgImg = Instance.new("ImageLabel")
+    bgImg.Name = "Bg"
+    bgImg.Size = UDim2.fromScale(1, 1)
+    bgImg.BackgroundTransparency = 1
+    bgImg.Image = BG_IDS[BgIndex]
+    bgImg.ImageTransparency = BG_ALPHA
+    bgImg.ScaleType = Enum.ScaleType.Crop
+    bgImg.ZIndex = 0
+    bgImg.Parent = main
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 10); bc.Parent = bgImg
+    FallbackBgImg = bgImg
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
