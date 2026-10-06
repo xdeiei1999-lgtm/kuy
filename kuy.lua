@@ -1954,8 +1954,13 @@ end
 -- Background 2 = Asset (Decal) 14751314303 (must be converted to the real image first, otherwise it will not show)
 local BG_TEXTURE_ID = 14751314324
 local BG_ASSET_ID = 14751314303
-local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID }
+-- Background 3 = Texture 134393565381500 (used directly); Asset (Decal) 130393160784262 is the fallback
+--   if the texture fails to load (the Decal is converted to its real image)
+local BG3_TEXTURE_ID = 134393565381500
+local BG3_ASSET_ID = 130393160784262
+local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID, "rbxassetid://" .. BG3_TEXTURE_ID }
 local BgAssetResolved = false
+local Bg3Checked = false
 local BG_ALPHA = 0.5          -- image transparency (0 = clearest, 1 = invisible)
 local BgIndex = 1
 local FallbackBgImg = nil     -- ImageLabel of the fallback menu (set when the fallback menu is built)
@@ -1979,8 +1984,32 @@ local function ResolveDecalImage(assetId)
     return nil
 end
 
+-- Check whether an image url really loads
+local function ImageLoads(url)
+    local ok, ready = pcall(function()
+        local img = Instance.new("ImageLabel")
+        img.Image = url
+        local result
+        game:GetService("ContentProvider"):PreloadAsync({ img }, function(_, status) result = status end)
+        pcall(function() img:Destroy() end)
+        return result == Enum.AssetFetchStatus.Success
+    end)
+    return ok and ready == true
+end
+
 local function ApplyBackground(idx)
     BgIndex = idx
+    -- Background 3: use the texture; if it does not load, fall back to converting the asset (Decal)
+    if idx == 3 and not Bg3Checked then
+        Bg3Checked = true
+        task.spawn(function()
+            if not ImageLoads(BG_IDS[3]) then
+                local img = ResolveDecalImage(BG3_ASSET_ID)
+                if img then BG_IDS[3] = img end
+            end
+            if BgIndex == 3 then ApplyBackground(3) end
+        end)
+    end
     -- Background 2 (Asset): convert to the real image the first time it's selected, then set the image
     if idx == 2 and not BgAssetResolved then
         BgAssetResolved = true
@@ -2052,7 +2081,7 @@ local Spec = {
         { "toggle", "Walkfling Whole Server", "Teleports your whole character and hitbox to kick everyone alive, one at a time", false, function(v) S.FlingAll = v end },
     } },
     { name = "Others", icon = "settings", items = {
-        { "dropdown", "Menu background", { "Background 1", "Background 2" }, "Background 1", function(v) ApplyBackground(v == "Background 2" and 2 or 1) end },
+        { "dropdown", "Menu background", { "Background 1", "Background 2", "Background 3" }, "Background 1", function(v) ApplyBackground(v == "Background 3" and 3 or (v == "Background 2" and 2 or 1)) end },
         { "button", "System check", "Check whether role / hook / args / GunDrop are working", function() Notify("System status", Diag() .. " | Shoot mode: " .. S.ShootMode) end },
         { "button", "Unload script", "Clears everything and restores graphics", function() Unload() end },
     } },
