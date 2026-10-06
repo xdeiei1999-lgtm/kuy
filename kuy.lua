@@ -1840,7 +1840,6 @@ local Spec = {
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
         { "toggle", "ฆ่าอัตโนมัติ (ถือมีดแล้วทุกคนตาย ไม่วาป)", "เปิดไว้ แล้วถือมีดในมือ สคริปต์จะโจมตีทุกคนที่ยังมีชีวิตทันที ตัวคุณอยู่ที่เดิม", false, function(v) S.AutoKill = v end },
-        { "button", "หยุดฆ่า", nil, function() KillCancel = true end },
         { "slider", "หน่วงต่อครั้ง (ms)", 100, 1000, 250, 50, function(v) S.KillDelay = v end },
         { "slider", "ลองซ้ำต่อเป้า (ครั้ง)", 1, 5, 3, 1, function(v) S.KillRetries = v end },
         { "toggle", "กลับตำแหน่งเดิมหลังเสร็จ", nil, true, function(v) S.KillReturn = v end },
