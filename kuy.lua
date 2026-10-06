@@ -63,6 +63,7 @@ local S = {
     -- ฆาตกร
     KillDelay = 250, KillRetries = 3, KillReturn = true,
     AutoKill = false,   -- ฆ่าอัตโนมัติเมื่อถือมีด (ไม่วาป)
+    FlingMurd = false, FlingSheriff = false, FlingAll = false,   -- Walkfling
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
 local KnifeTpl = {}   -- args ที่เกมใช้กับ Knife.Events.* (จับอัตโนมัติ)
@@ -1241,6 +1242,79 @@ task.spawn(function()
 end)
 
 -- ============================================================
+-- Walkfling (เปิด/ปิดแยกกัน): ฆาตกร / มือปืน / ทั้งเซิร์ฟ
+--   ตัวเราวาปไปติดตัวเป้าทีละคน ปั่นความเร็วสูงมากให้เป้ากระเด็น
+--   จบรอบแล้วกลับตำแหน่งเดิมของรอบนั้น  ปิดสวิตช์ทั้งหมดแล้วหยุดทันที
+-- ============================================================
+local function FlingOn() return S.FlingMurd or S.FlingSheriff or S.FlingAll end
+
+local function FlingTargets()
+    local list = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP and IsAlive(plr) then
+            local role = GetRole(plr)
+            if role ~= "Dead" and (S.FlingAll
+                or (S.FlingMurd and role == "Murderer")
+                or (S.FlingSheriff and (role == "Sheriff" or role == "Hero"))) then
+                local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then list[#list + 1] = { plr = plr, hrp = hrp } end
+            end
+        end
+    end
+    return list
+end
+
+local function FlingOne(t, myHrp)
+    local t0 = os.clock()
+    local startPos = t.hrp.Position
+    while Alive and FlingOn() and os.clock() - t0 < 0.7 do
+        local hrp = t.hrp
+        if not (hrp.Parent and myHrp.Parent) then break end
+        -- กระเด็นไปไกลแล้ว (ย้ายเกิน 80 studs หรือความเร็วสูงมาก) ไปคนต่อไปได้
+        if (hrp.Position - startPos).Magnitude > 80 or hrp.AssemblyLinearVelocity.Magnitude > 300 then break end
+        myHrp.CFrame = hrp.CFrame * CFrame.new(math.random(-10, 10) / 20, 0, math.random(-10, 10) / 20)
+        myHrp.AssemblyLinearVelocity = Vector3.new(5e4, 5e4, 5e4)
+        myHrp.AssemblyAngularVelocity = Vector3.new(0, 5e4, 0)
+        RunService.Heartbeat:Wait()
+        myHrp.AssemblyLinearVelocity = Vector3.zero
+        myHrp.AssemblyAngularVelocity = Vector3.zero
+        RunService.Stepped:Wait()
+    end
+end
+
+task.spawn(function()
+    while Alive do
+        if FlingOn() then
+            local char = LP.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local myHrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hum and myHrp and hum.Health > 0 then
+                local list = FlingTargets()
+                if #list > 0 then
+                    local home = myHrp.CFrame
+                    for _, t in ipairs(list) do
+                        if not (Alive and FlingOn()) then break end
+                        pcall(FlingOne, t, myHrp)
+                    end
+                    if myHrp.Parent then
+                        myHrp.AssemblyLinearVelocity = Vector3.zero
+                        myHrp.AssemblyAngularVelocity = Vector3.zero
+                        myHrp.CFrame = home
+                    end
+                    task.wait(0.15)
+                else
+                    task.wait(0.4)
+                end
+            else
+                task.wait(0.4)
+            end
+        else
+            task.wait(0.3)
+        end
+    end
+end)
+
+-- ============================================================
 -- Hook: จับรูปแบบ args จริงของเกม
 -- ============================================================
 local HookOK = false
@@ -1712,6 +1786,7 @@ local function Unload()
     KillCancel = true
     S.ESP = false
     S.AutoKill = false
+    S.FlingMurd, S.FlingSheriff, S.FlingAll = false, false, false
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
     DestroyAllESP()
     ClearDropESP()
@@ -1788,6 +1863,11 @@ local Spec = {
     { name = "FPS", icon = "zap", items = {
         { "toggle", "FPS Boost (สุดแรง)", "ลบ texture/เสื้อผ้า/เอฟเฟกต์ทั้งหมด ตัวละครทุกคนและพื้นเป็นสีเทา ปิดเงา/แสง", false, function(v) FPS.on = v; RefreshFPS() end },
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
+    } },
+    { name = "Fling", icon = "wind", items = {
+        { "toggle", "Walkfling ฆาตกร", "วาปไปติดฆาตกรแล้วปั่นให้กระเด็น จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling มือปืน", "ทำกับคนที่ถือปืน (Sheriff / Hero)", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วนทำกับทุกคนที่ยังมีชีวิตทีละคน", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
