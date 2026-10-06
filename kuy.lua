@@ -1258,8 +1258,8 @@ end)
 
 -- ============================================================
 -- Walkfling (เปิด/ปิดแยกกัน): ฆาตกร / มือปืน / ทั้งเซิร์ฟ
---   ตัวเราไม่วาป: เดินเข้าไปใกล้เป้า เมื่อ hitbox ชนกัน เป้าจะกระเด็นออกไป
---   เตะ: ตอน hitbox ชนเป้าที่เลือก ส่งแรงสูงมากไปทางเป้า (เดินปกติได้เมื่อไม่ได้ชน)
+--   วาปไปเตะเป้าทีละคน พุ่งทะลุตัวเป้าด้วยแรงสูงมาก จบรอบวาปกลับที่เดิม
+--   ปิดสวิตช์ทั้งหมดแล้วหยุดทันที (ตัวเราจะถูกวาปไปมาระหว่างทำงาน)
 -- ============================================================
 local function FlingOn() return S.FlingMurd or S.FlingSheriff or S.FlingAll end
 
@@ -1280,7 +1280,6 @@ local function FlingTargets()
 end
 
 local FlingSt = { char = nil, saved = {} }
-local FLING_RANGE = 7   -- ระยะ (studs) ที่เริ่มทำงานเมื่อเข้าใกล้เป้า
 
 -- ทำตัวเราหนักสุดเพื่อให้แรงชนถ่ายไปที่เป้ามากที่สุด
 local function FlingRestore()
@@ -1302,63 +1301,79 @@ local function FlingHeavy(char)
     end
 end
 
--- หาเป้าที่อยู่ใกล้ และเช็กว่า hitbox ชนกับตัวเราหรือยัง (รัศมี 4.5 studs รอบตัว เผื่อจังหวะก่อนชน)
-local function FlingContact(myHrp)
-    local chars, byChar = {}, {}
-    local nearest, nd = nil, math.huge
-    for _, t in ipairs(FlingTargets()) do
-        if t.hrp.Parent then
-            local d = (t.hrp.Position - myHrp.Position).Magnitude
-            if d <= FLING_RANGE then
-                chars[#chars + 1] = t.hrp.Parent
-                byChar[t.hrp.Parent] = t
-                if d < nd then nearest, nd = t, d end
-            end
-        end
-    end
-    if #chars == 0 then return nil, false end
+-- วาปไปเตะเป้า 1 คน: เข้าจากทิศที่เรามา พุ่งทะลุตัวเป้าทุกเฟรมด้วยแรงสูงมาก (ทิศเตะ = ไปทางเป้า)
+-- จนเป้ากระเด็นไกล (> 150 studs หรือเร็วมาก) หรือหมดเวลา
+local function FlingOne(t, myHrp, char, home)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local startPos = t.hrp.Position
+    local t0 = os.clock()
+    local i = 0
+    local lunge = { -1.6, -0.6, 0.4, -1.0 }       -- ระยะพุ่งตามทิศเตะ สลับไปมาให้ชนแน่
+    local thrust = Instance.new("BodyThrust")
+    thrust.Force = Vector3.new(9e8, 9e8, 9e8)
+    thrust.Location = myHrp.Position
+    thrust.Parent = myHrp
+    if hum then hum.PlatformStand = true end
 
-    local op = OverlapParams.new()
-    op.FilterType = Enum.RaycastFilterType.Include
-    op.FilterDescendantsInstances = chars
-    local ok, parts = pcall(function() return Workspace:GetPartBoundsInRadius(myHrp.Position, 4.5, op) end)
-    if ok and parts and #parts > 0 then
-        local m = parts[1]:FindFirstAncestorOfClass("Model")
-        return (m and byChar[m]) or nearest, true
+    while Alive and FlingOn() and os.clock() - t0 < 1.8 do
+        local hrp = t.hrp
+        if not (hrp.Parent and myHrp.Parent) then break end
+        if (hrp.Position - startPos).Magnitude > 150 or hrp.AssemblyLinearVelocity.Magnitude > 500 then break end
+        if hum and hum.Health <= 0 then break end
+
+        -- ทิศเตะ: จากจุดเริ่มของเราไปทางเป้า (แนวราบ) ตามตำแหน่งเป้าล่าสุด
+        local dir = hrp.Position - home.Position
+        dir = Vector3.new(dir.X, 0, dir.Z)
+        if dir.Magnitude < 0.1 then dir = hrp.CFrame.LookVector end
+        dir = dir.Unit
+
+        i = i % #lunge + 1
+        local pos = hrp.Position + dir * lunge[i]
+        myHrp.CFrame = CFrame.lookAt(pos, pos + dir)
+        for _, d in ipairs(char:GetChildren()) do
+            if d:IsA("BasePart") and d ~= myHrp then d.CanCollide = false end
+        end
+        myHrp.AssemblyLinearVelocity = dir * 1e5 + Vector3.new(0, 3e4, 0)
+        myHrp.AssemblyAngularVelocity = Vector3.new(9e8, 9e8, 9e8)
+        RunService.Heartbeat:Wait()
+        RunService.Stepped:Wait()
     end
-    return nearest, false
+
+    pcall(function() thrust:Destroy() end)
+    if hum then hum.PlatformStand = false end
+    myHrp.AssemblyLinearVelocity = Vector3.zero
+    myHrp.AssemblyAngularVelocity = Vector3.zero
 end
 
 task.spawn(function()
-    local flip = 1
     while Alive do
         if FlingOn() then
             local char = LP.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             local myHrp = char and char:FindFirstChild("HumanoidRootPart")
             if hum and myHrp and hum.Health > 0 then
-                if FlingSt.char ~= char then FlingHeavy(char) end
-                local tgt, touching = FlingContact(myHrp)
-                if tgt and touching then
-                    -- เตะ: ส่งแรงสูงมากพุ่งจากตัวเราไปทางเป้า (กระเด็นออกจากตัวเรา) + ยกขึ้นเล็กน้อย
-                    local away = tgt.hrp.Position - myHrp.Position
-                    away = Vector3.new(away.X, 0, away.Z)
-                    if away.Magnitude < 0.1 then away = myHrp.CFrame.LookVector end
-                    local kick = away.Unit * 1e5 + Vector3.new(0, 3e4, 0)
-                    local vel = myHrp.AssemblyLinearVelocity
-                    myHrp.AssemblyLinearVelocity = kick
-                    myHrp.AssemblyAngularVelocity = Vector3.new(0, 9e5, 0)
-                    RunService.RenderStepped:Wait()
-                    myHrp.AssemblyLinearVelocity = vel
-                    RunService.Stepped:Wait()
-                    flip = -flip
-                    myHrp.AssemblyLinearVelocity = vel + Vector3.new(0, 0.1 * flip, 0)
-                    myHrp.AssemblyAngularVelocity = Vector3.zero
+                local list = FlingTargets()
+                if #list > 0 then
+                    if FlingSt.char ~= char then FlingHeavy(char) end   -- ตัวเราหนักสุด
+                    local home = myHrp.CFrame
+                    for _, t in ipairs(list) do
+                        if not (Alive and FlingOn()) then break end
+                        pcall(FlingOne, t, myHrp, char, home)
+                    end
+                    -- กลับที่เดิม: ย้ำตำแหน่งหลายเฟรมกันตัวเราลอยตามแรงที่เหลือ
+                    for _ = 1, 8 do
+                        if not myHrp.Parent then break end
+                        myHrp.AssemblyLinearVelocity = Vector3.zero
+                        myHrp.AssemblyAngularVelocity = Vector3.zero
+                        myHrp.CFrame = home
+                        RunService.Heartbeat:Wait()
+                    end
+                    task.wait(0.15)
                 else
-                    RunService.Heartbeat:Wait()
+                    task.wait(0.4)
                 end
             else
-                task.wait(0.3)
+                task.wait(0.4)
             end
         else
             if FlingSt.char then FlingRestore() end
@@ -1963,9 +1978,9 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "toggle", "Walkfling ฆาตกร", "เดินเข้าไปชน/เตะฆาตกร เขาจะกระเด็นออกจากตัวคุณ (ไม่วาป)", false, function(v) S.FlingMurd = v end },
-        { "toggle", "Walkfling มือปืน", "เดินเข้าไปชน/เตะคนที่ถือปืน (Sheriff / Hero) เขาจะกระเด็น", false, function(v) S.FlingSheriff = v end },
-        { "toggle", "Walkfling ทั้งเซิร์ฟ", "เดินเข้าไปชน/เตะใครก็ได้ที่ยังมีชีวิต เขาจะกระเด็น", false, function(v) S.FlingAll = v end },
+        { "toggle", "Walkfling ฆาตกร", "วาปไปเตะฆาตกรให้กระเด็นไกลออกนอกแมพ จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling มือปืน", "วาปไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
