@@ -1288,6 +1288,10 @@ local function FlingRestore()
     end
     FlingSt.saved = {}
     FlingSt.char = nil
+    if FlingSt.size and FlingSt.hrp then
+        pcall(function() FlingSt.hrp.Size = FlingSt.size end)
+    end
+    FlingSt.size, FlingSt.hrp = nil, nil
 end
 
 local function FlingHeavy(char)
@@ -1315,6 +1319,12 @@ local function FlingOne(t, myHrp, char, home)
     thrust.Parent = myHrp
     if hum then hum.PlatformStand = true end
 
+    -- ขยาย hitbox (HumanoidRootPart) ให้ใหญ่ขึ้นตอนเตะ ชนง่ายขึ้น (คืนขนาดเดิมตอนจบ)
+    if not FlingSt.size then
+        FlingSt.hrp, FlingSt.size = myHrp, myHrp.Size
+    end
+    pcall(function() myHrp.Size = Vector3.new(7, 7, 7) end)
+
     while Alive and FlingOn() and os.clock() - t0 < 1.8 do
         local hrp = t.hrp
         if not (hrp.Parent and myHrp.Parent) then break end
@@ -1329,7 +1339,9 @@ local function FlingOne(t, myHrp, char, home)
 
         i = i % #lunge + 1
         local pos = hrp.Position + dir * lunge[i]
-        myHrp.CFrame = CFrame.lookAt(pos, pos + dir)
+        -- วาปทั้งตัวละคร (ทุกชิ้นส่วน) พร้อม hitbox ไปพร้อมกัน
+        char:PivotTo(CFrame.lookAt(pos, pos + dir))
+        myHrp.CanCollide = true
         for _, d in ipairs(char:GetChildren()) do
             if d:IsA("BasePart") and d ~= myHrp then d.CanCollide = false end
         end
@@ -1341,6 +1353,10 @@ local function FlingOne(t, myHrp, char, home)
 
     pcall(function() thrust:Destroy() end)
     if hum then hum.PlatformStand = false end
+    if FlingSt.size then
+        pcall(function() myHrp.Size = FlingSt.size end)
+        FlingSt.size, FlingSt.hrp = nil, nil
+    end
     myHrp.AssemblyLinearVelocity = Vector3.zero
     myHrp.AssemblyAngularVelocity = Vector3.zero
 end
@@ -1365,7 +1381,7 @@ task.spawn(function()
                         if not myHrp.Parent then break end
                         myHrp.AssemblyLinearVelocity = Vector3.zero
                         myHrp.AssemblyAngularVelocity = Vector3.zero
-                        myHrp.CFrame = home
+                        char:PivotTo(home)      -- วาปทั้งตัวละครกลับพร้อม hitbox
                         RunService.Heartbeat:Wait()
                     end
                     task.wait(0.15)
@@ -1978,9 +1994,9 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "toggle", "Walkfling ฆาตกร", "วาปไปเตะฆาตกรให้กระเด็นไกลออกนอกแมพ จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
-        { "toggle", "Walkfling มือปืน", "วาปไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
-        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
+        { "toggle", "Walkfling ฆาตกร", "วาปทั้งตัวละครและ hitbox ไปเตะฆาตกรให้กระเด็นไกล จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling มือปืน", "วาปทั้งตัวละครและ hitbox ไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปทั้งตัวละครและ hitbox ไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
