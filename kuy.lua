@@ -1,23 +1,23 @@
 --[[
-    MM2 HUB v10  (ไฟล์เดียว รวมทุกอย่าง)
-    UI: WindUI  (ถ้าโหลดไม่ได้ จะใช้ UI สำรองในตัวอัตโนมัติ)
+    MM2 HUB v10  (single file, everything included)
+    UI: WindUI  (automatically falls back to a built-in UI if it fails to load)
 
-    ฟีเจอร์
-      - ESP แบบรวม (สวิตช์เดียว): ผู้เล่นแยกบทบาท + ชื่อ/ระยะ/อาวุธ + ปืนที่ดรอป
-      - มือปืน 2 โหมด:  1) ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง)
-                         2) ยิงทะลุ (กระสุนวาปติด hitbox ฆาตกร)
-      - ฆาตกร: ฆ่าทั้งแมพ วาปไปหา hitbox ทีละคน
-      - ฆาตกร: โยนมีด (มีดวาปไปที่ hitbox ของผู้เล่นที่เล็งใกล้สุด)
-      - ปุ่มลอย: SHOOT / MODE / THROW (โยนมีด) / GRAB GUN (เก็บปืนที่ดรอป)
-        ล็อกตำแหน่ง ปรับขนาด รีเซ็ตตำแหน่งได้
-      - FPS Boost (ลบ texture/เสื้อผ้า/เอฟเฟกต์ ตัวละครและพื้นเป็นสีเทา)
+    Features
+      - Unified ESP (single switch): players by role + name/distance/weapon + dropped gun
+      - Sheriff, 2 modes:  1) Normal shot (no wall in the way)
+                         2) Wall shot (bullet teleports onto the murderer's hitbox)
+      - Murderer: Kill All, teleport to each hitbox one by one
+      - Murderer: Throw Knife (knife teleports to the hitbox of the player you aim at most closely)
+      - Floating buttons: SHOOT / MODE / THROW (throw knife) / GRAB GUN (pick up dropped gun)
+        Lock position, resize, reset position
+      - FPS Boost (removes textures/clothes/effects; characters and floor turn gray)
 ]]
 
 local env = (getgenv and getgenv()) or _G
 if env.MM2HubUnload then pcall(env.MM2HubUnload) end
 
 -- ============================================================
--- Services / พื้นฐาน
+-- Services / basics
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -49,26 +49,26 @@ local function SafeParent()
     return LP:WaitForChild("PlayerGui")
 end
 
--- โหมดยิงของมือปืน
-local MODE_1 = "โหมด 1: ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง)"
-local MODE_2 = "โหมด 2: ยิงทะลุ (กระสุนวาปติด hitbox)"
+-- Sheriff shot modes
+local MODE_1 = "Mode 1: Normal (no wall in the way)"
+local MODE_2 = "Mode 2: Wall shot (bullet teleports onto hitbox)"
 
 local S = {
     ESP = false,
-    -- มือปืน
+    -- Sheriff
     ShootMode = MODE_1, AimPart = "Torso",
     ArgMode = "CFrame, CFrame",
-    -- ปุ่มลอย
+    -- Floating buttons
     ShootBtn = false, ModeBtn = false, ThrowBtn = false, GunBtn = false, LockBtn = false, BtnSize = 140, ShootSize = 64,
-    -- ฆาตกร
+    -- Murderer
     KillDelay = 250, KillRetries = 3, KillReturn = true,
-    AutoKill = false,   -- ฆ่าอัตโนมัติเมื่อถือมีด (ไม่วาป)
+    AutoKill = false,   -- auto kill while holding the knife (no teleport)
     FlingMurd = false, FlingSheriff = false, FlingAll = false,   -- Walkfling
     AimbotOn = false, AimbotPart = "Head", AimbotPower = 60,
     AimbotNeedGun = true,   -- Aimbot
-    GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
+    GunTpl = nil,     -- args the game really uses to shoot the gun (captured automatically)
 }
-local KnifeTpl = {}   -- args ที่เกมใช้กับ Knife.Events.* (จับอัตโนมัติ)
+local KnifeTpl = {}   -- args the game uses with Knife.Events.* (captured automatically)
 
 local Folder = Instance.new("Folder")
 Folder.Name = RName()
@@ -94,7 +94,7 @@ local function Notify(title, content)
 end
 
 -- ============================================================
--- ระบบ Role (อ่านจากข้อมูลที่เกมส่งมา ไม่ใช่เดาจาก Backpack)
+-- Role system (read from data the game sends, not guessed from the Backpack)
 -- ============================================================
 local RoleCache = {}
 local RoleSource = "tools only"
@@ -212,7 +212,7 @@ local function GetMurderer()
 end
 
 -- ============================================================
--- ESP ผู้เล่น
+-- Player ESP
 -- ============================================================
 local RoleColor = {
     Murderer = Color3.fromRGB(255, 50, 50),
@@ -226,7 +226,7 @@ local RoleLabel = {
     Innocent = "Innocent", Unknown = "?",
 }
 
-local KeyRole = { Murderer = true, Sheriff = true, Hero = true }   -- ตัวสำคัญ: เด่นและชัดเสมอ
+local KeyRole = { Murderer = true, Sheriff = true, Hero = true }   -- key roles: always prominent and clear
 
 local ESPObjs = {}
 
@@ -266,7 +266,7 @@ local function EnsureESP(plr, char, head)
         bb.StudsOffset = Vector3.new(0, 2.6, 0)
         bb.Parent = Folder
 
-        -- บรรทัดบน: role + อาวุธที่ถือ
+        -- Top line: role + held weapon
         local l1 = Instance.new("TextLabel")
         l1.BackgroundTransparency = 1
         l1.Size = UDim2.new(1, 0, 0, 20)
@@ -275,7 +275,7 @@ local function EnsureESP(plr, char, head)
         l1.TextStrokeTransparency = 0.25
         l1.Parent = bb
 
-        -- บรรทัดล่าง: ชื่อ | ระยะ
+        -- Bottom line: name | distance
         local l2 = Instance.new("TextLabel")
         l2.BackgroundTransparency = 1
         l2.Position = UDim2.new(0, 0, 0, 20)
@@ -318,7 +318,7 @@ local function UpdateESP()
                 o.hl.Enabled = true
                 o.bb.Enabled = true
 
-                -- ตั้งสีเฉพาะตอน role เปลี่ยน (ลดงานต่อรอบ)
+                -- Set color only when the role changes (less work per cycle)
                 if o.role ~= role then
                     o.role = role
                     local col = RoleColor[role] or RoleColor.Unknown
@@ -328,7 +328,7 @@ local function UpdateESP()
                     o.hl.FillTransparency = (role == "Murderer" and 0.4) or (key and 0.5) or 0.78
                 end
 
-                -- คนทั่วไปไกลๆ จางและเล็กลง ตัวสำคัญชัดเสมอ
+                -- Regular players far away fade and shrink; key roles always stay clear
                 local fade = key and 0 or math.clamp((dist - 250) / 1200, 0, 0.55)
                 o.l1.TextTransparency = fade
                 o.l2.TextTransparency = fade
@@ -370,10 +370,10 @@ Connect(Players.PlayerRemoving, function(plr)
 end)
 
 -- ============================================================
--- ปืนที่ดรอป (GunDrop): ติดตามตลอด + ESP (เปิด/ปิดได้) + ใช้กับปุ่มวาปเก็บปืน
+-- Dropped gun (GunDrop): tracked at all times + ESP (toggleable) + used by the grab-gun button
 -- ============================================================
 local DropInsts = {}   -- [inst] = true
-local DropObjs  = {}   -- [inst] = {hl, bb}  (เฉพาะตอนเปิด ESP)
+local DropObjs  = {}   -- [inst] = {hl, bb}  (only while ESP is on)
 
 local function RemoveDropESP(inst)
     local o = DropObjs[inst]
@@ -439,7 +439,7 @@ local function ShowDropESP()
     for inst in pairs(DropInsts) do AddDropESP(inst) end
 end
 
--- อัปเดตระยะบนป้าย GUN DROP
+-- Update the distance on the GUN DROP tag
 task.spawn(function()
     while Alive do
         local myHrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -468,15 +468,15 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- มือปืน: 2 โหมด
+-- Sheriff: 2 modes
 -- ============================================================
 local function IsSpatial(v)
     local t = typeof(v)
     return t == "CFrame" or t == "Vector3"
 end
 
--- เปลี่ยนตำแหน่งปลายทาง (ตำแหน่งตัวสุดท้ายใน args) เป็นเป้า
--- ถ้าให้ origin มาและมีตำแหน่ง >= 2 ตัว จะเปลี่ยนตัวแรกเป็นต้นทางกระสุน
+-- Replace the destination position (the last position in args) with the target
+-- If an origin is given and there are >= 2 positions, the first one becomes the bullet origin
 local function Retarget(args, origin, target)
     local idx = {}
     for i = 1, args.n do
@@ -507,9 +507,9 @@ local function Retarget(args, origin, target)
 end
 
 local function DefaultArgs(origin, target)
-    if S.ArgMode == "Vector3 (เป้า)" then
+    if S.ArgMode == "Vector3 (target)" then
         return table.pack(target)
-    elseif S.ArgMode == "Vector3 (ต้นทาง, เป้า)" then
+    elseif S.ArgMode == "Vector3 (origin, target)" then
         return table.pack(origin, target)
     end
     return table.pack(CFrame.lookAt(origin, target), CFrame.new(target))
@@ -524,7 +524,7 @@ local function BuildShotArgs(origin, target)
     return DefaultArgs(origin, target)
 end
 
--- วัดความเร็วเป้าเองจากตำแหน่งจริงทุกเฟรม (แม่นกว่า AssemblyLinearVelocity ของตัวละครคนอื่น)
+-- Measure the target's speed ourselves from real positions every frame (more accurate than other characters' AssemblyLinearVelocity)
 local VelTrack = setmetatable({}, { __mode = "k" })   -- [plr] = { pos, vel }
 
 Connect(RunService.Heartbeat, function(dt)
@@ -537,7 +537,7 @@ Connect(RunService.Heartbeat, function(dt)
                 local rec = VelTrack[plr]
                 if rec then
                     local v = (pos - rec.pos) / dt
-                    if v.Magnitude > 120 then v = Vector3.zero end   -- วาป / รีสปอว์น
+                    if v.Magnitude > 120 then v = Vector3.zero end   -- teleport / respawn
                     rec.vel = rec.vel:Lerp(v, 0.6)
                     rec.pos = pos
                 else
@@ -550,15 +550,15 @@ Connect(RunService.Heartbeat, function(dt)
     end
 end)
 
--- ความหน่วงเน็ต (วินาที) ใช้ชดเชยตำแหน่งเป้าฝั่งเซิร์ฟเวอร์ที่ล้ำหน้าที่เราเห็น
+-- Network latency (seconds), used to compensate for the server-side target position being ahead of what we see
 local function PingLead()
     local ok, ping = pcall(function() return LP:GetNetworkPing() end)
     if not ok or type(ping) ~= "number" then return 0 end
     return math.clamp(ping, 0, 0.25)
 end
 
--- คืนระยะที่เป้าจะเคลื่อนไปใน lead วินาที (จำกัดไม่เกิน maxDist เพื่อไม่ให้เล็งหลุดตัวเป้า)
--- ยืนบนพื้นตัดแกน Y / ถูกวาปหรือเหวี่ยงแรงไม่ชดเชย
+-- Returns how far the target will move in `lead` seconds (capped at maxDist so the aim doesn't leave the target)
+-- Standing on the ground drops the Y axis / if teleported or flung, no compensation
 local function PredictOffset(plr, char, lead, maxDist)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return Vector3.zero end
@@ -575,7 +575,7 @@ local function PredictOffset(plr, char, lead, maxDist)
     return off
 end
 
--- โหมด 1: เช็คว่ามีกำแพง/วัตถุแมพบังระหว่างเรากับเป้าไหม (ไม่นับตัวผู้เล่น)
+-- Mode 1: check whether a wall/map object blocks us from the target (players don't count)
 local function HasLineOfSight(fromPos, toPos)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
@@ -589,9 +589,9 @@ local function HasLineOfSight(fromPos, toPos)
     return result == nil
 end
 
--- เช็คว่ากระสุน from -> to จะโดนตัวผู้เล่นคนอื่น (ที่ไม่ใช่ฆาตกร/ตัวเรา) หรือไม่
--- รวมถึงกรณีต้นทางหรือจุดเล็งอยู่ในตัวคนอื่นด้วย
-local ShotTry = 0   -- นัดที่เท่าไรของการกดยิงรอบนี้ (ใช้หมุนจุดเล็งเมื่อพลาด)
+-- Check whether a bullet from -> to would hit another player (not the murderer / not us)
+-- Also covers the origin or aim point being inside another player
+local ShotTry = 0   -- which shot of this press (used to rotate the aim point on a miss)
 
 local function HitsOthers(fromPos, toPos, murdererChar)
     local list = {}
@@ -606,7 +606,7 @@ local function HitsOthers(fromPos, toPos, murdererChar)
     rp.FilterDescendantsInstances = list
     local dir = toPos - fromPos
     if dir.Magnitude > 0.01 then
-        -- Spherecast รัศมี 0.3 ให้มีระยะเผื่อรอบเส้นกระสุน (ถ้าไม่รองรับใช้ Raycast)
+        -- Spherecast radius 0.3 gives some margin around the bullet line (falls back to Raycast if unsupported)
         local done, hit = pcall(function() return Workspace:Spherecast(fromPos, 0.3, dir, rp) end)
         if not done then hit = Workspace:Raycast(fromPos, dir, rp) end
         if hit then return true end
@@ -622,17 +622,17 @@ local function HitsOthers(fromPos, toPos, murdererChar)
     return false
 end
 
--- โหมด 2: วางต้นทางกระสุนห่างจาก hitbox แค่ ~2 studs (ไม่มีอะไรมาคั่น)
+-- Mode 2: place the bullet origin only ~2 studs from the hitbox (nothing in between)
 local function NearOrigin(myPos, targetPos)
     local dir = myPos - targetPos
     if dir.Magnitude < 3 then return myPos end
     return targetPos + dir.Unit * 1.5
 end
 
--- คำนวณการยิง: คืน origin, point  (origin = nil แปลว่าใช้ต้นทางเดิมของเกม)
---   โหมด 1: ลองเล็ง ลำตัว/หัว/ช่วงล่าง ตามลำดับ เลือกจุดแรกที่ "มองเห็นจริง" ไม่มีกำแพงบัง
---   โหมด 2: เล็งกลาง hitbox (ชดเชย ping จำกัดไม่เกิน 1 stud) และวางต้นทางกระสุนติด hitbox (ทะลุกำแพง)
---   ถ้าโหมด 1 ถูกบังทุกจุดจะคืน nil, nil, "blocked"
+-- Compute the shot: returns origin, point  (origin = nil means use the game's original origin)
+--   Mode 1: try torso/head/lower body in order, pick the first point that is truly visible with no wall
+--   Mode 2: aim at the hitbox center (ping compensation capped at 1 stud) and put the bullet origin on the hitbox (through walls)
+--   If every point is blocked in mode 1, returns nil, nil, "blocked"
 local function ComputeShot(target, myHrp)
     local char = target.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -643,7 +643,7 @@ local function ComputeShot(target, myHrp)
     local ping = PingLead()
 
     if S.ShootMode == MODE_2 then
-        -- ทะลุ: เล็งกลาง hitbox + ชดเชย ping แต่จำกัดไม่เกิน 1 stud ให้จุดเล็งอยู่ในตัวเป้าเสมอ
+        -- Wall shot: aim at the hitbox center + ping compensation, capped at 1 stud so the point always stays inside the target
         local off2 = PredictOffset(target, char, ping + 0.05, 1.8)
         local pts = {}
         if S.AimPart == "Head" and head then pts[#pts + 1] = head.Position end
@@ -652,7 +652,7 @@ local function ComputeShot(target, myHrp)
         if lower then pts[#pts + 1] = lower.Position end
         if head and S.AimPart ~= "Head" then pts[#pts + 1] = head.Position end
 
-        -- ถ้านัดก่อนพลาด หมุนจุดเล็งหลัก (กลางตัว/ลำตัว/ช่วงล่าง) เพื่อไม่ยิงเส้นเดิมซ้ำ
+        -- If the previous shot missed, rotate the main aim point (center/torso/lower) so we don't repeat the same line
         local n = math.min(#pts, 3)
         local rot = ShotTry % n
         if rot > 0 then
@@ -662,8 +662,8 @@ local function ComputeShot(target, myHrp)
             pts = r
         end
 
-        -- กระสุนวาปไปติด hitbox ฆาตกร: ลองต้นทางจาก "ใกล้มาก" ไปไกลขึ้นทีละระดับ (0.5 -> 2.5 studs)
-        -- หลายทิศรอบจุดเล็ง เลือกชุดแรกที่เส้นกระสุน + ต้นทาง + จุดเล็ง ไม่แตะ hitbox ใครนอกจากฆาตกร
+        -- Bullet teleports onto the murderer's hitbox: try origins from very close outward in steps (0.5 -> 2.5 studs)
+        -- in several directions around the aim point; pick the first set where the bullet line + origin + aim point touch no hitbox except the murderer's
         local cf = hrp.CFrame
         local dists = { 0.5, 1.0, 1.6, 2.5 }
         for _, base in ipairs(pts) do
@@ -689,7 +689,7 @@ local function ComputeShot(target, myHrp)
         return nil, nil, "crowded"
     end
 
-    -- โหมด 1: ลองจุดต่างๆ ของตัว เลือกจุดแรกที่ไม่มีกำแพงบัง (เริ่มจากส่วนที่ hitbox ใหญ่สุด)
+    -- Mode 1: try different body points, pick the first with no wall in the way (start with the part with the largest hitbox)
     local off = PredictOffset(target, char, ping + 0.06, 4)
     local cands = {}
     if S.AimPart == "Head" and head then cands[#cands + 1] = head.Position end
@@ -709,7 +709,7 @@ end
 
 local lastShot = 0
 
--- คำนวณใหม่จากตำแหน่งล่าสุดแล้วยิง 1 นัด
+-- Recompute from the latest position, then fire 1 shot
 local function FireShotOnce(shoot, target, myHrp)
     local origin, p, why = ComputeShot(target, myHrp)
     if not p then return false, why end
@@ -728,7 +728,7 @@ local function ShootMurderer()
 
     local target = GetMurderer()
     if not target then
-        Notify("ยิงไม่ได้", "ไม่พบฆาตกร (อาจยังไม่เริ่มรอบ)")
+        Notify("Cannot shoot", "Murderer not found (the round may not have started)")
         return
     end
 
@@ -746,13 +746,13 @@ local function ShootMurderer()
         end
     end
     if not gun then
-        Notify("ยิงไม่ได้", "คุณไม่มีปืน (ต้องเป็น Sheriff / Hero)")
+        Notify("Cannot shoot", "You do not have a gun (must be Sheriff / Hero)")
         return
     end
 
     local shoot = gun:FindFirstChild("Shoot")
     if not (shoot and shoot:IsA("RemoteEvent")) then
-        Notify("ยิงไม่ได้", "ไม่พบ Remote 'Shoot' ในปืน")
+        Notify("Cannot shoot", "'Shoot' remote not found in the gun")
         return
     end
 
@@ -760,14 +760,14 @@ local function ShootMurderer()
     local ok, why = FireShotOnce(shoot, target, myHrp)
     if not ok then
         if why == "blocked" then
-            Notify("ยิงไม่ได้ (โหมด 1)", "มีกำแพงหรือผู้เล่นคนอื่นบังทุกจุดของฆาตกร สลับเป็นโหมด 2 ถ้าต้องการยิงทะลุกำแพง")
+            Notify("Cannot shoot (Mode 1)", "A wall or another player blocks every part of the murderer. Switch to Mode 2 to shoot through walls")
         elseif why == "crowded" then
-            Notify("ยิงไม่ได้ (โหมด 2)", "มีผู้เล่นคนอื่นรอบฆาตกรจนยิงโดนเฉพาะฆาตกรไม่ได้ ลองใหม่อีกครั้ง")
+            Notify("Cannot shoot (Mode 2)", "Other players around the murderer make a murderer-only shot impossible. Try again")
         end
         return
     end
 
-    -- เช็คผล: ถ้ายังไม่ตายใน 0.5 วิ ยิงซ้ำด้วยตำแหน่งล่าสุด (สูงสุด 2 ครั้ง ถ้าปืนยังอยู่ในมือ)
+    -- Check the result: if not dead within 0.5s, shoot again from the latest position (up to 2 times, if the gun is still in hand)
     task.spawn(function()
         for _ = 1, 5 do
             task.wait(0.4)
@@ -775,7 +775,7 @@ local function ShootMurderer()
             local c = target.Character
             local h = c and c:FindFirstChildOfClass("Humanoid")
             if (not h) or h.Health <= 0 or GetRole(target) == "Dead" then
-                Notify("ยิงโดน", "ฆาตกรตายแล้ว")
+                Notify("Hit", "The murderer is dead")
                 return
             end
             if _ == 5 then return end
@@ -792,7 +792,7 @@ local function ShootMurderer()
 end
 
 -- ============================================================
--- วาปไปเก็บปืนที่ดรอป
+-- Teleport to pick up the dropped gun
 -- ============================================================
 local Grabbing = false
 
@@ -824,16 +824,16 @@ local function GrabGun()
     local myHrp = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and myHrp and hum.Health > 0) then return end
     if HasGun() then
-        Notify("เก็บปืน", "คุณมีปืนอยู่แล้ว")
+        Notify("Grab gun", "You already have a gun")
         return
     end
     local part = NearestDropPart(myHrp.Position)
     if not part then
-        Notify("เก็บปืน", "ไม่พบปืนที่ดรอป (ยังไม่มีใครตาย หรือยังไม่เริ่มรอบ)")
+        Notify("Grab gun", "No dropped gun found (nobody has died yet, or the round has not started)")
         return
     end
     if not firetouchinterest then
-        Notify("เก็บปืนไม่ได้", "executor นี้ไม่รองรับ firetouchinterest (ต้องใช้ส่ง hitbox ไปแตะปืน)")
+        Notify("Cannot grab gun", "This executor does not support firetouchinterest (needed to send the hitbox to touch the gun)")
         return
     end
 
@@ -842,7 +842,7 @@ local function GrabGun()
     local done = false
     local links = {}
 
-    -- รู้ทันทีที่ปืนเข้ากระเป๋า/ตัว
+    -- Know immediately when the gun enters the backpack/character
     local bp = LP:FindFirstChildOfClass("Backpack")
     if bp then
         links[#links + 1] = bp.ChildAdded:Connect(function(c) if c.Name == "Gun" then done = true end end)
@@ -854,7 +854,7 @@ local function GrabGun()
         if d:IsA("BasePart") then bodyParts[#bodyParts + 1] = d end
     end
 
-    -- ส่ง "hitbox" (ชิ้นส่วนตัวละคร) ไปแตะปืน โดยตัวละครอยู่กับที่
+    -- Send the "hitbox" (character part) to touch the gun while the character stays in place
     local function touchAll()
         if firetouchinterest then
             for _, bpart in ipairs(bodyParts) do
@@ -871,7 +871,7 @@ local function GrabGun()
     end
 
     pcall(function()
-        touchAll()   -- เฟรมแรก
+        touchAll()   -- first frame
         local frame = 0
         while not done and Alive and os.clock() - t0 < 0.6 do
             RunService.Heartbeat:Wait()
@@ -889,14 +889,14 @@ local function GrabGun()
     for _, l in ipairs(links) do pcall(function() l:Disconnect() end) end
     Grabbing = false
     if got then
-        Notify("เก็บปืน", string.format("เก็บปืนสำเร็จ (%.2f วิ)", os.clock() - t0))
+        Notify("Grab gun", string.format("Gun grabbed (%.2f s)", os.clock() - t0))
     else
-        Notify("เก็บปืน", "ส่ง hitbox ไปแตะแล้วแต่เซิร์ฟเวอร์ไม่รับ (เกมอาจเช็คระยะ)")
+        Notify("Grab gun", "Hitbox touched the gun but the server did not accept it (the game may check distance)")
     end
 end
 
 -- ============================================================
--- ฆาตกร: ฆ่าทั้งแมพ วาปไปหา hitbox
+-- Murderer: Kill All, teleport to each hitbox
 -- ============================================================
 local KillRunning, KillCancel = false, false
 
@@ -923,7 +923,7 @@ local function GetKnife(char, hum)
     return char:FindFirstChild("Knife")
 end
 
--- เปลี่ยน args ที่เกมเคยใช้กับมีด ให้ชี้ไปที่เหยื่อ
+-- Redirect the args the game once used with the knife to point at the victim
 local function RetargetKnife(args, vChar, vPart)
     for i = 1, args.n do
         local v = args[i]
@@ -981,7 +981,7 @@ local function KillAll(silent)
     local myHrp = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and myHrp and hum.Health > 0) then return end
     if not HasKnife() then
-        if not silent then Notify("ฆ่าไม่ได้", "คุณไม่มีมีด (ต้องเป็น Murderer)") end
+        if not silent then Notify("Cannot kill", "You do not have a knife (must be Murderer)") end
         return
     end
 
@@ -1004,7 +1004,7 @@ local function KillAll(silent)
                 if not (vHrp and vHum and vHum.Health > 0) then break end
                 if not (myHrp.Parent and hum.Health > 0) then break end
 
-                -- วาปไปด้านหลัง hitbox ของเป้า (ห่าง 2 studs หันหน้าเข้าหา)
+                -- Teleport behind the target's hitbox (2 studs away, facing it)
                 local behind = (vHrp.CFrame * CFrame.new(0, 0, 2)).Position
                 myHrp.CFrame = CFrame.lookAt(behind, vHrp.Position)
                 myHrp.AssemblyLinearVelocity = Vector3.zero
@@ -1036,13 +1036,13 @@ local function KillAll(silent)
     end
     KillRunning = false
     if not silent or killed > 0 then
-        Notify("Kill All", string.format("เสร็จแล้ว: %d / %d", killed, total))
+        Notify("Kill All", string.format("Done: %d / %d", killed, total))
     end
 end
 
--- โยนมีด: เลือกผู้เล่นที่อยู่ใกล้แนวกล้องที่สุด แล้วส่งมีดไปที่ hitbox
+-- Throw knife: pick the player closest to the camera line, then send the knife to the hitbox
 local ThrowBusy = false
-local ThrowLock = nil      -- ผู้เล่นที่ล็อกเป้าไว้ (มีดทุกลูกไปหาคนนี้จนกว่าจะตาย/ออก/ปลดล็อก)
+local ThrowLock = nil      -- locked target player (every knife goes to this player until they die/leave/unlock)
 local ThrowFloat = nil
 
 local function UpdateThrowText()
@@ -1079,12 +1079,12 @@ local function ThrowKnife()
     local myHrp = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and myHrp and hum.Health > 0) then return end
     if not HasKnife() then
-        Notify("โยนมีดไม่ได้", "คุณไม่มีมีด (ต้องเป็น Murderer)")
+        Notify("Cannot throw knife", "You do not have a knife (must be Murderer)")
         return
     end
     ThrowBusy = true
 
-    -- ล็อกเป้า: ถ้ามีเป้าที่ล็อกไว้และยังอยู่/ยังไม่ตาย ใช้คนเดิม ไม่งั้นเลือกใหม่แล้วล็อก
+    -- Target lock: if a locked target is still present and alive, keep them; otherwise pick a new one and lock
     if ThrowLock and not (ThrowLock.Parent and IsAlive(ThrowLock) and GetRole(ThrowLock) ~= "Dead") then
         SetThrowLock(nil)
     end
@@ -1094,7 +1094,7 @@ local function ThrowKnife()
     local vHrp = vChar and vChar:FindFirstChild("HumanoidRootPart")
     local knife = GetKnife(char, hum)
     if not (vHrp and knife) then
-        Notify("โยนมีดไม่ได้", vHrp and "ถือมีดไม่ได้" or "ไม่พบผู้เล่นเป้าหมาย")
+        Notify("Cannot throw knife", vHrp and "Cannot equip the knife" or "Target player not found")
         ThrowBusy = false
         return
     end
@@ -1102,7 +1102,7 @@ local function ThrowKnife()
     local ev = knife:FindFirstChild("Events")
     local handle = knife:FindFirstChild("Handle")
 
-    -- Remote โยนมีดของเกม: Knife.Events.KnifeThrown (args: CFrame ต้นทาง, CFrame เป้าหมาย)
+    -- The game's knife-throw remote: Knife.Events.KnifeThrown (args: origin CFrame, target CFrame)
     local remote = ev and ev:FindFirstChild("KnifeThrown")
     if not (remote and remote:IsA("RemoteEvent")) then
         remote = nil
@@ -1114,12 +1114,12 @@ local function ThrowKnife()
         end
     end
     if not remote then
-        Notify("โยนมีดไม่ได้", "ไม่พบ Remote โยนมีด (KnifeThrown)")
+        Notify("Cannot throw knife", "Knife throw remote (KnifeThrown) not found")
         ThrowBusy = false
         return
     end
 
-    -- เก็บมีดที่เกมสร้างตอนโยน (projectile) เพื่อวาปไปที่ hitbox ของเป้า (ตัวละครเราไม่วาป)
+    -- Collect the knife the game creates when thrown (projectile) to teleport it onto the target's hitbox (our character doesn't teleport)
     local projs = {}
     local pc = Workspace.DescendantAdded:Connect(function(d)
         pcall(function()
@@ -1130,8 +1130,8 @@ local function ThrowKnife()
         end)
     end)
 
-    -- โยนมีด: ต้นทางของมีดอยู่ติด hitbox ของเป้า (ห่างแค่ ~1.5 studs ไม่มีกำแพงคั่น)
-    -- เป้าหมายคือกลาง hitbox  ตัวละครเราอยู่ที่เดิม
+    -- Throw knife: the knife origin sits right on the target's hitbox (only ~1.5 studs away, nothing in between)
+    -- The target is the hitbox center; our character stays where it is
     local function FireThrow()
         if not vHrp.Parent then return end
         local target = vHrp.Position
@@ -1148,7 +1148,7 @@ local function ThrowKnife()
     end
     FireThrow()
 
-    -- ตามเป้าช่วงสั้นๆ: ดึงมีดที่โยนไปติด hitbox ทุกก้าว และให้มีดแตะ hitbox ซ้ำ
+    -- Follow the target for a short time: pull the thrown knife onto the hitbox every step and touch the hitbox again
     local vHum = vChar:FindFirstChildOfClass("Humanoid")
     for step = 1, 10 do
         if not Alive or not vHrp.Parent then break end
@@ -1178,19 +1178,19 @@ local function ThrowKnife()
     pc:Disconnect()
 
     if (not vHum) or vHum.Health <= 0 then
-        Notify("โยนมีด", "โดน " .. plr.Name)
+        Notify("Throw knife", "Hit " .. plr.Name)
         SetThrowLock(nil)
     else
-        Notify("โยนมีด", "ล็อกเป้า " .. plr.Name .. " (กดอีกครั้งเพื่อโยนซ้ำ)")
+        Notify("Throw knife", "Locked on " .. plr.Name .. " (press again to throw again)")
     end
     task.wait(0.1)
     ThrowBusy = false
 end
 
 -- ============================================================
--- ฆ่าอัตโนมัติ (เปิด/ปิด): ถือมีดอยู่เมื่อไร ทุกคนที่ยังมีชีวิตถูกโจมตีทันที
---   ตัวเราอยู่ที่เดิม ไม่วาป  ส่งทั้งคำสั่งแทง/สัมผัส/โยนมีดไปที่ hitbox ของแต่ละคน
---   ต้อง "ถือมีดไว้ในมือ" เท่านั้น (ไม่หยิบมีดให้เอง)
+-- Auto kill (toggle): whenever you hold the knife, everyone alive is attacked instantly
+--   Our character stays in place, no teleport; stab/touch/throw commands are sent to each player's hitbox
+--   You must be "holding the knife in hand" (the script will not equip it for you)
 -- ============================================================
 local AutoKillStats = { last = 0, count = 0 }
 
@@ -1201,7 +1201,7 @@ local function AutoKillStep()
     local myHrp = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and myHrp and hum.Health > 0) then return end
 
-    local knife = char:FindFirstChild("Knife")        -- ต้องถืออยู่ในมือ
+    local knife = char:FindFirstChild("Knife")        -- must be held in hand
     if not (knife and knife:IsA("Tool")) then return end
     local ev = knife:FindFirstChild("Events")
     local handle = knife:FindFirstChild("Handle")
@@ -1217,17 +1217,17 @@ local function AutoKillStep()
             local vHum = vChar and vChar:FindFirstChildOfClass("Humanoid")
             if vHrp and vHum and vHum.Health > 0 then
                 n = n + 1
-                -- 1) แทง / สัมผัสผ่านคำสั่งของมีด
+                -- 1) Stab / touch through the knife's commands
                 pcall(FireKnife, ev, "KnifeStabbed", vChar, vHrp)
                 pcall(FireKnife, ev, "HandleTouched", vChar, vHrp)
-                -- 2) ให้มีดแตะ hitbox ของเป้าโดยตรง
+                -- 2) Make the knife touch the target's hitbox directly
                 if firetouchinterest and handle then
                     pcall(function()
                         firetouchinterest(handle, vHrp, 0)
                         firetouchinterest(handle, vHrp, 1)
                     end)
                 end
-                -- 3) โยนมีดโดยให้ต้นทางอยู่ติด hitbox ของเป้า
+                -- 3) Throw the knife with the origin right on the target's hitbox
                 if throwRemote and throwRemote:IsA("RemoteEvent") then
                     pcall(function()
                         local target = vHrp.Position
@@ -1257,9 +1257,9 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- Walkfling (เปิด/ปิดแยกกัน): ฆาตกร / มือปืน / ทั้งเซิร์ฟ
---   วาปไปเตะเป้าทีละคน พุ่งทะลุตัวเป้าด้วยแรงสูงมาก จบรอบวาปกลับที่เดิม
---   ปิดสวิตช์ทั้งหมดแล้วหยุดทันที (ตัวเราจะถูกวาปไปมาระหว่างทำงาน)
+-- Walkfling (separate toggles): Murderer / Sheriff / whole server
+--   Teleport to kick each target one by one, charging through the target with massive force, then teleport back at the end of the round
+--   Turning all switches off stops it immediately (our character gets teleported around while it runs)
 -- ============================================================
 local function FlingOn() return S.FlingMurd or S.FlingSheriff or S.FlingAll end
 
@@ -1281,7 +1281,7 @@ end
 
 local FlingSt = { char = nil, saved = {} }
 
--- ทำตัวเราหนักสุดเพื่อให้แรงชนถ่ายไปที่เป้ามากที่สุด
+-- Make ourselves as heavy as possible so the impact force transfers to the target the most
 local function FlingRestore()
     for d, props in pairs(FlingSt.saved) do
         pcall(function() d.CustomPhysicalProperties = props end)
@@ -1305,21 +1305,21 @@ local function FlingHeavy(char)
     end
 end
 
--- วาปไปเตะเป้า 1 คน: เข้าจากทิศที่เรามา พุ่งทะลุตัวเป้าทุกเฟรมด้วยแรงสูงมาก (ทิศเตะ = ไปทางเป้า)
--- จนเป้ากระเด็นไกล (> 150 studs หรือเร็วมาก) หรือหมดเวลา
+-- Teleport to kick 1 target: approach from the direction we came from, charge through the target every frame with massive force (kick direction = toward the target)
+-- until the target is flung far (> 150 studs or very fast) or time runs out
 local function FlingOne(t, myHrp, char, home)
     local hum = char:FindFirstChildOfClass("Humanoid")
     local startPos = t.hrp.Position
     local t0 = os.clock()
     local i = 0
-    local lunge = { -1.6, -0.6, 0.4, -1.0 }       -- ระยะพุ่งตามทิศเตะ สลับไปมาให้ชนแน่
+    local lunge = { -1.6, -0.6, 0.4, -1.0 }       -- lunge distances along the kick direction, alternating so we hit for sure
     local thrust = Instance.new("BodyThrust")
     thrust.Force = Vector3.new(9e8, 9e8, 9e8)
     thrust.Location = myHrp.Position
     thrust.Parent = myHrp
     if hum then hum.PlatformStand = true end
 
-    -- ขยาย hitbox (HumanoidRootPart) ให้ใหญ่ขึ้นตอนเตะ ชนง่ายขึ้น (คืนขนาดเดิมตอนจบ)
+    -- Enlarge the hitbox (HumanoidRootPart) while kicking so it connects more easily (restored at the end)
     if not FlingSt.size then
         FlingSt.hrp, FlingSt.size = myHrp, myHrp.Size
     end
@@ -1331,7 +1331,7 @@ local function FlingOne(t, myHrp, char, home)
         if (hrp.Position - startPos).Magnitude > 150 or hrp.AssemblyLinearVelocity.Magnitude > 500 then break end
         if hum and hum.Health <= 0 then break end
 
-        -- ทิศเตะ: จากจุดเริ่มของเราไปทางเป้า (แนวราบ) ตามตำแหน่งเป้าล่าสุด
+        -- Kick direction: from our start point toward the target (horizontal), based on the latest target position
         local dir = hrp.Position - home.Position
         dir = Vector3.new(dir.X, 0, dir.Z)
         if dir.Magnitude < 0.1 then dir = hrp.CFrame.LookVector end
@@ -1339,7 +1339,7 @@ local function FlingOne(t, myHrp, char, home)
 
         i = i % #lunge + 1
         local pos = hrp.Position + dir * lunge[i]
-        -- วาปทั้งตัวละคร (ทุกชิ้นส่วน) พร้อม hitbox ไปพร้อมกัน
+        -- Teleport the whole character (every part) together with the hitbox
         char:PivotTo(CFrame.lookAt(pos, pos + dir))
         myHrp.CanCollide = true
         for _, d in ipairs(char:GetChildren()) do
@@ -1370,18 +1370,18 @@ task.spawn(function()
             if hum and myHrp and hum.Health > 0 then
                 local list = FlingTargets()
                 if #list > 0 then
-                    if FlingSt.char ~= char then FlingHeavy(char) end   -- ตัวเราหนักสุด
+                    if FlingSt.char ~= char then FlingHeavy(char) end   -- make us as heavy as possible
                     local home = myHrp.CFrame
                     for _, t in ipairs(list) do
                         if not (Alive and FlingOn()) then break end
                         pcall(FlingOne, t, myHrp, char, home)
                     end
-                    -- กลับที่เดิม: ย้ำตำแหน่งหลายเฟรมกันตัวเราลอยตามแรงที่เหลือ
+                    -- Go back: re-apply the position for several frames so we don't drift from leftover force
                     for _ = 1, 8 do
                         if not myHrp.Parent then break end
                         myHrp.AssemblyLinearVelocity = Vector3.zero
                         myHrp.AssemblyAngularVelocity = Vector3.zero
-                        char:PivotTo(home)      -- วาปทั้งตัวละครกลับพร้อม hitbox
+                        char:PivotTo(home)      -- teleport the whole character back with the hitbox
                         RunService.Heartbeat:Wait()
                     end
                     task.wait(0.15)
@@ -1400,7 +1400,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- Aimbot (มือปืน): ล็อกกล้องไปที่ฆาตกรเท่านั้น (ไม่ล็อกคนอื่นเลย)
+-- Aimbot (Sheriff): locks the camera onto the murderer only (never locks anyone else)
 -- ============================================================
 local AIMBOT_BIND = "MM2HubAimbot"
 
@@ -1414,7 +1414,7 @@ local function AimbotStep(dt)
     local cam = Workspace.CurrentCamera
     if not cam then return end
 
-    local plr = GetMurderer()                       -- ล็อกเฉพาะฆาตกร
+    local plr = GetMurderer()                       -- lock the murderer only
     local tChar = plr and plr.Character
     local hrp = tChar and tChar:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
@@ -1439,7 +1439,7 @@ RunService:BindToRenderStep(AIMBOT_BIND, Enum.RenderPriority.Camera.Value + 1, f
 end)
 
 -- ============================================================
--- Hook: จับรูปแบบ args จริงของเกม
+-- Hook: capture the game's real args format
 -- ============================================================
 local HookOK = false
 do
@@ -1476,8 +1476,8 @@ do
 end
 
 -- ============================================================
--- ปุ่มลอย (สี่เหลี่ยมสีดำ / ลากได้ / ล็อกตำแหน่งได้ / ปรับความยาวได้)
---   ขอบปุ่มใช้ UIStroke แบบ Border จึงไม่ทำให้ตัวหนังสือเรืองแสง
+-- Floating buttons (black squares / draggable / lockable position / adjustable length)
+--   The button border uses a Border-mode UIStroke, so the text doesn't glow
 -- ============================================================
 local FloatList = {}
 local ModeFloat = nil
@@ -1489,7 +1489,7 @@ end
 local function ToggleShootMode()
     S.ShootMode = (S.ShootMode == MODE_1) and MODE_2 or MODE_1
     if ModeFloat then ModeFloat.btn.Text = ModeText() end
-    Notify("โหมดยิง", S.ShootMode)
+    Notify("Shoot mode", S.ShootMode)
 end
 
 local function BtnHeight()
@@ -1533,7 +1533,7 @@ local function MakeFloat(text, wMul, defaultPos, onClick, square)
     local st = Instance.new("UIStroke")
     st.Thickness = 1.5
     st.Color = Color3.fromRGB(200, 200, 200)
-    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border   -- ขอบปุ่มเท่านั้น ไม่แตะตัวอักษร
+    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border   -- button border only, does not touch the text
     st.Parent = b
     local pad = Instance.new("UIPadding")
     pad.PaddingLeft = UDim.new(0, 7); pad.PaddingRight = UDim.new(0, 7)
@@ -1543,7 +1543,7 @@ local function MakeFloat(text, wMul, defaultPos, onClick, square)
     tsc.MaxTextSize = 14; tsc.MinTextSize = 6
     tsc.Parent = b
 
-    -- ป้าย LOCKED เล็กๆ มุมขวาบน (ไม่แตะข้อความหลักของปุ่ม)
+    -- Small LOCKED tag in the top-right corner (doesn't touch the button's main text)
     local tag = Instance.new("TextLabel")
     tag.BackgroundTransparency = 1
     tag.AnchorPoint = Vector2.new(1, 0)
@@ -1599,7 +1599,7 @@ local function MakeFloat(text, wMul, defaultPos, onClick, square)
     return entry
 end
 
--- ปุ่มยิงเล็กลงเล็กน้อย / ปุ่มอื่นสั้นลง  เรียงลงมาทางขวาของจอ
+-- Shoot button slightly smaller / other buttons shorter, stacked down the right side of the screen
 local ShootFloat = MakeFloat("SHOOT", 1.00, UDim2.new(1, -12, 0.30, 0), ShootMurderer, true)
 ModeFloat        = MakeFloat(ModeText(),       0.90, UDim2.new(1, -12, 0.42, 0), ToggleShootMode)
 ThrowFloat = MakeFloat("THROW KNIFE",     0.90, UDim2.new(1, -12, 0.54, 0), ThrowKnife)
@@ -1607,28 +1607,28 @@ local GunFloat   = MakeFloat("GRAB GUN",       0.90, UDim2.new(1, -12, 0.66, 0),
 RefreshFloat()
 
 -- ============================================================
--- FPS Boost (สวิตช์เดียว)
---   แมพ     : วัสดุเรียบ, ปิดเงา, ลบ Decal/Texture/SurfaceAppearance/Mesh texture,
---             ปิด Particle/Trail/Beam/ไฟ/Highlight และเอฟเฟกต์ทั้งหมด
---   พื้น    : พื้นแมพ + Terrain เป็นสีเทา
---   ตัวละคร : ทุกคน (รวมตัวเรา) ไม่มีเสื้อผ้า/เครื่องแต่งตัว/หน้า และเป็นสีเทาทั้งตัว
---   แสงโลก  : ปิดเงาโลก, ปิด PostEffect ทุกตัว, หมอก/เมฆ/หญ้า/คลื่นน้ำ
---   เรนเดอร์: Quality ต่ำสุด, MeshPart detail ต่ำสุด
+-- FPS Boost (single switch)
+--   Map     : smooth material, shadows off, remove Decal/Texture/SurfaceAppearance/Mesh texture,
+--             turn off Particle/Trail/Beam/lights/Highlight and all effects
+--   Floor   : map floor + Terrain turn gray
+--   Characters: everyone (including us) has no clothes/accessories/face and a fully gray body
+--   World lighting: global shadows off, all PostEffects off, fog/clouds/grass/water waves
+--   Rendering: lowest Quality, lowest MeshPart detail
 -- ============================================================
 local GRAY = Color3.fromRGB(128, 128, 128)
 local GRAY_FLOOR = Color3.fromRGB(110, 110, 110)
 
 local FPS = {
     on = false,
-    orig = setmetatable({}, { __mode = "k" }),   -- ค่าเดิมของแต่ละ Instance
-    light = {},                                   -- ค่าเดิมของ Lighting/Terrain/อื่นๆ
-    terrain = nil,                                -- สีเดิมของวัสดุ Terrain
+    orig = setmetatable({}, { __mode = "k" }),   -- original values of each Instance
+    light = {},                                   -- original values of Lighting/Terrain/others
+    terrain = nil,                                -- original Terrain material colors
     render = nil,
     token = 0,
     conn = nil,
 }
 
--- คืนผู้เล่นเจ้าของตัวละครที่ inst อยู่ข้างใน (ถ้าไม่ใช่ส่วนของตัวละครคืน nil)
+-- Returns the player who owns the character that inst is inside (nil if it isn't part of a character)
 local function CharOwner(inst)
     local p = inst.Parent
     while p and p ~= Workspace do
@@ -1664,7 +1664,7 @@ end
 local function ApplyInst(inst)
     if not FPS.on then return end
 
-    -- เอฟเฟกต์ทั้งหมด + ไฟ
+    -- All effects + lights
     if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
         or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles")
         or inst:IsA("Light") or inst:IsA("Highlight")
@@ -1680,7 +1680,7 @@ local function ApplyInst(inst)
         return
     end
 
-    -- เสื้อผ้าและของแต่งตัวตัวละคร
+    -- Character clothes and accessories
     if inst:IsA("Shirt") then RSet(inst, "ShirtTemplate", ""); return end
     if inst:IsA("Pants") then RSet(inst, "PantsTemplate", ""); return end
     if inst:IsA("ShirtGraphic") then RSet(inst, "Graphic", ""); return end
@@ -1692,7 +1692,7 @@ local function ApplyInst(inst)
         return
     end
 
-    -- Texture ทุกชนิด
+    -- Every kind of Texture
     if inst:IsA("Decal") or inst:IsA("Texture") then
         RSet(inst, "Transparency", 1)
         return
@@ -1711,7 +1711,7 @@ local function ApplyInst(inst)
         if inst:IsA("Terrain") then return end
         local owner = CharOwner(inst)
         if owner then
-            -- ตัวละครทุกคน: สีเทา ไม่มีเงา ซ่อนเครื่องแต่งตัว
+            -- Every character: gray, no shadow, hide accessories
             RSet(inst, "CastShadow", false)
             RSet(inst, "Material", Enum.Material.SmoothPlastic)
             RSet(inst, "Reflectance", 0)
@@ -1759,7 +1759,7 @@ local function RestoreRecords()
     end
 end
 
--- ค่าระดับโลก (Lighting / Terrain / Atmosphere / Rendering)
+-- Global settings (Lighting / Terrain / Atmosphere / Rendering)
 local function LSet(obj, prop, val)
     local ok, cur = pcall(function() return obj[prop] end)
     if not ok then return end
@@ -1841,7 +1841,7 @@ local function ApplyGlobal()
         LSet(terrain, "WaterReflectance", 0)
         local clouds = terrain:FindFirstChildOfClass("Clouds")
         if clouds then LSet(clouds, "Enabled", false) end
-        -- พื้น Terrain เป็นสีเทา
+        -- Terrain floor turns gray
         if not FPS.terrain then
             FPS.terrain = {}
             for _, m in ipairs(Enum.Material:GetEnumItems()) do
@@ -1867,7 +1867,7 @@ local function RefreshFPS()
         if FPS.on then
             ApplyGlobal()
             FPS.conn = Workspace.DescendantAdded:Connect(function(d)
-                -- รอให้ตัวละครผูกกับผู้เล่นก่อน จะได้แยกของผู้เล่นออกจากแมพถูก
+                -- Wait for the character to be bound to a player first, so player parts can be told apart from the map
                 if Alive then task.delay(0.3, function() pcall(ApplyInst, d) end) end
             end)
             ChunkEach(Workspace:GetDescendants(), my, ApplyInst)
@@ -1931,36 +1931,36 @@ end
 env.MM2HubUnload = Unload
 
 -- ============================================================
--- UI (ประกาศเป็นข้อมูลครั้งเดียว แล้วแสดงด้วย WindUI หรือ UI สำรอง)
+-- UI (declared once as data, then shown with WindUI or the fallback UI)
 -- ============================================================
 local function Diag()
     local gun = LP.Character and LP.Character:FindFirstChild("Gun")
     local drops = 0
     for _ in pairs(DropInsts) do drops = drops + 1 end
     return string.format(
-        "roles: %s | hook: %s | args ปืน: %s | args มีด: %s | Gun.Shoot: %s | มีด: %s | GunDrop: %d",
-        RoleSource, HookOK and "ok" or "ไม่รองรับ",
-        S.GunTpl and "มี" or "ยังไม่มี",
-        next(KnifeTpl) and "มี" or "ยังไม่มี",
-        (gun and gun:FindFirstChild("Shoot")) and "พบ" or "ไม่ได้ถือปืน",
-        HasKnife() and "มี" or "ไม่มี",
+        "roles: %s | hook: %s | gun args: %s | knife args: %s | Gun.Shoot: %s | knife: %s | GunDrop: %d",
+        RoleSource, HookOK and "ok" or "unsupported",
+        S.GunTpl and "yes" or "not yet",
+        next(KnifeTpl) and "yes" or "not yet",
+        (gun and gun:FindFirstChild("Shoot")) and "found" or "gun not held",
+        HasKnife() and "yes" or "no",
         drops)
 end
 
 -- ============================================================
--- พื้นหลังเมนู: รูป 2 แบบ (เลือกได้ในแท็บ อื่นๆ)
+-- Menu background: 2 images (selectable in the Others tab)
 -- ============================================================
--- พื้นหลัง 1 = Texture 14751314324 (ใช้เป็นรูปได้ตรงๆ)
--- พื้นหลัง 2 = Asset (Decal) 14751314303 (ต้องแปลงเป็นรูปจริงก่อน ไม่งั้นรูปไม่ขึ้น)
+-- Background 1 = Texture 14751314324 (usable directly as an image)
+-- Background 2 = Asset (Decal) 14751314303 (must be converted to the real image first, otherwise it will not show)
 local BG_TEXTURE_ID = 14751314324
 local BG_ASSET_ID = 14751314303
 local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID }
 local BgAssetResolved = false
-local BG_ALPHA = 0.5          -- ความโปร่งใสของรูป (0 = ชัดสุด, 1 = มองไม่เห็น)
+local BG_ALPHA = 0.5          -- image transparency (0 = clearest, 1 = invisible)
 local BgIndex = 1
-local FallbackBgImg = nil     -- ImageLabel ของเมนูสำรอง (ตั้งตอนสร้างเมนูสำรอง)
+local FallbackBgImg = nil     -- ImageLabel of the fallback menu (set when the fallback menu is built)
 
--- แปลง Decal asset เป็น id รูปจริง (อ่านค่า Texture ของ Decal ผ่าน GetObjects)
+-- Convert a Decal asset into the real image id (read the Decal's Texture via GetObjects)
 local function ResolveDecalImage(assetId)
     local ok, res = pcall(function()
         local objs = game:GetObjects("rbxassetid://" .. assetId)
@@ -1981,7 +1981,7 @@ end
 
 local function ApplyBackground(idx)
     BgIndex = idx
-    -- พื้นหลัง 2 (Asset): แปลงเป็นรูปจริงครั้งแรกที่เลือก แล้วค่อยตั้งรูป
+    -- Background 2 (Asset): convert to the real image the first time it's selected, then set the image
     if idx == 2 and not BgAssetResolved then
         BgAssetResolved = true
         task.spawn(function()
@@ -2001,7 +2001,7 @@ end
 
 local Spec = {
     { name = "ESP", icon = "eye", items = {
-        { "toggle", "ESP (รวมทุกอย่าง)", "ผู้เล่นแยกบทบาท Murderer / Sheriff / Hero / Innocent พร้อมชื่อ ระยะ อาวุธที่ถือ + ปืนที่ดรอป", false, function(v)
+        { "toggle", "ESP (everything)", "Players split by role Murderer / Sheriff / Hero / Innocent with name, distance, held weapon + dropped gun", false, function(v)
             S.ESP = v
             if v then
                 ShowDropESP()
@@ -2011,50 +2011,50 @@ local Spec = {
             end
         end },
     } },
-    { name = "มือปืน", icon = "crosshair", items = {
-        { "button", "สลับโหมดยิง (โหมด 1 / โหมด 2)", "โหมด 1 ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง) / โหมด 2 ยิงทะลุกำแพง", ToggleShootMode },
-        { "dropdown", "จุดเล็ง", { "Torso", "Head" }, "Torso", function(v) S.AimPart = v end },
-        { "dropdown", "รูปแบบ args (ใช้เมื่อยังไม่เคยยิงเอง)", { "CFrame, CFrame", "Vector3 (เป้า)", "Vector3 (ต้นทาง, เป้า)" }, "CFrame, CFrame", function(v) S.ArgMode = v end },
+    { name = "Sheriff", icon = "crosshair", items = {
+        { "button", "Switch shoot mode (Mode 1 / Mode 2)", "Mode 1 normal shot (no wall in the way) / Mode 2 shoots through walls", ToggleShootMode },
+        { "dropdown", "Aim point", { "Torso", "Head" }, "Torso", function(v) S.AimPart = v end },
+        { "dropdown", "Args format (used until you have shot manually once)", { "CFrame, CFrame", "Vector3 (target)", "Vector3 (origin, target)" }, "CFrame, CFrame", function(v) S.ArgMode = v end },
     } },
     { name = "Aimbot", icon = "target", items = {
-        { "toggle", "Aimbot ล็อกฆาตกร", "ล็อกกล้องไปที่ฆาตกรเท่านั้น ไม่ล็อกผู้เล่นคนอื่น", false, function(v) S.AimbotOn = v end },
-        { "dropdown", "จุดล็อก", { "Head", "Torso" }, "Head", function(v) S.AimbotPart = v end },
-        { "slider", "ความแรงล็อก (%) 100 = ล็อกทันที", 5, 100, 60, 5, function(v) S.AimbotPower = v end },
-        { "toggle", "ล็อกเฉพาะตอนถือปืน", nil, true, function(v) S.AimbotNeedGun = v end },
+        { "toggle", "Aimbot (lock murderer)", "Locks the camera onto the murderer only, never other players", false, function(v) S.AimbotOn = v end },
+        { "dropdown", "Lock point", { "Head", "Torso" }, "Head", function(v) S.AimbotPart = v end },
+        { "slider", "Lock strength (%) 100 = instant lock", 5, 100, 60, 5, function(v) S.AimbotPower = v end },
+        { "toggle", "Lock only while holding the gun", nil, true, function(v) S.AimbotNeedGun = v end },
     } },
-    { name = "ฆาตกร", icon = "skull", items = {
-        { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
-        { "toggle", "ฆ่าอัตโนมัติ (ถือมีดแล้วทุกคนตาย ไม่วาป)", "เปิดไว้ แล้วถือมีดในมือ สคริปต์จะโจมตีทุกคนที่ยังมีชีวิตทันที ตัวคุณอยู่ที่เดิม", false, function(v) S.AutoKill = v end },
-        { "slider", "หน่วงต่อครั้ง (ms)", 100, 1000, 250, 50, function(v) S.KillDelay = v end },
-        { "slider", "ลองซ้ำต่อเป้า (ครั้ง)", 1, 5, 3, 1, function(v) S.KillRetries = v end },
-        { "toggle", "กลับตำแหน่งเดิมหลังเสร็จ", nil, true, function(v) S.KillReturn = v end },
+    { name = "Murderer", icon = "skull", items = {
+        { "button", "Kill All (teleport to hitboxes)", "Teleports to one player at a time, nearest first", function() task.spawn(KillAll, false) end },
+        { "toggle", "Auto Kill (hold the knife and everyone dies, no teleport)", "Turn on, then hold the knife in hand. The script attacks everyone alive instantly while you stay in place", false, function(v) S.AutoKill = v end },
+        { "slider", "Delay per attempt (ms)", 100, 1000, 250, 50, function(v) S.KillDelay = v end },
+        { "slider", "Retries per target", 1, 5, 3, 1, function(v) S.KillRetries = v end },
+        { "toggle", "Return to original position when done", nil, true, function(v) S.KillReturn = v end },
     } },
-    { name = "ปุ่มลอย", icon = "mouse-pointer-click", items = {
-        { "toggle", "ปุ่มลอย SHOOT (สี่เหลี่ยมเล็ก)", "กดแล้วยิงฆาตกรทันที", false, function(v) S.ShootBtn = v; ShootFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย MODE (สลับโหมดยิง)", "กดสลับ MODE 1: NORMAL / MODE 2: WALL ข้อความบนปุ่มบอกโหมดปัจจุบัน", false, function(v) S.ModeBtn = v; ModeFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย THROW KNIFE (โยนมีด)", "กดแล้วล็อกคนที่เล็งใกล้สุด มีดวาปไปที่ hitbox ตัวละครไม่วาป (ต้องเป็นฆาตกร)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
-        { "toggle", "ปุ่มลอย GRAB GUN", "ส่ง hitbox ไปแตะปืนดรอปที่ใกล้สุด ตัวละครไม่วาป", false, function(v) S.GunBtn = v; GunFloat.btn.Visible = v end },
-        { "toggle", "ล็อกตำแหน่งปุ่มลอย", "กันลากโดนตอนกด (ขอบปุ่มเป็นสีเขียวและขึ้นป้าย LOCKED)", false, function(v) S.LockBtn = v; RefreshFloat() end },
-        { "slider", "ขนาดปุ่มยิง (สี่เหลี่ยม)", 36, 110, 64, 2, function(v) S.ShootSize = v; RefreshFloat() end },
-        { "slider", "ความยาวปุ่มอื่น", 90, 240, 140, 10, function(v) S.BtnSize = v; RefreshFloat() end },
-        { "button", "รีเซ็ตตำแหน่งปุ่ม", nil, function()
+    { name = "Floating Buttons", icon = "mouse-pointer-click", items = {
+        { "toggle", "SHOOT floating button (small square)", "Press to shoot the murderer instantly", false, function(v) S.ShootBtn = v; ShootFloat.btn.Visible = v end },
+        { "toggle", "MODE floating button (switch shoot mode)", "Press to switch MODE 1: NORMAL / MODE 2: WALL. The button text shows the current mode", false, function(v) S.ModeBtn = v; ModeFloat.btn.Visible = v end },
+        { "toggle", "THROW KNIFE floating button", "Press to lock the closest player you aim at; the knife teleports to the hitbox and your character stays put (Murderer only)", false, function(v) S.ThrowBtn = v; ThrowFloat.btn.Visible = v end },
+        { "toggle", "GRAB GUN floating button", "Sends your hitbox to touch the nearest dropped gun; your character stays put", false, function(v) S.GunBtn = v; GunFloat.btn.Visible = v end },
+        { "toggle", "Lock floating button position", "Prevents accidental dragging while pressing (button border turns green and shows a LOCKED tag)", false, function(v) S.LockBtn = v; RefreshFloat() end },
+        { "slider", "Shoot button size (square)", 36, 110, 64, 2, function(v) S.ShootSize = v; RefreshFloat() end },
+        { "slider", "Other buttons length", 90, 240, 140, 10, function(v) S.BtnSize = v; RefreshFloat() end },
+        { "button", "Reset button positions", nil, function()
             for _, e in ipairs(FloatList) do e.btn.Position = e.defaultPos end
         end },
     } },
     { name = "FPS", icon = "zap", items = {
-        { "toggle", "FPS Boost (สุดแรง)", "ลบ texture/เสื้อผ้า/เอฟเฟกต์ทั้งหมด ตัวละครทุกคนและพื้นเป็นสีเทา ปิดเงา/แสง", false, function(v) FPS.on = v; RefreshFPS() end },
-        { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
+        { "toggle", "FPS Boost (maximum)", "Removes all textures/clothes/effects; every character and the floor turn gray; shadows/lighting off", false, function(v) FPS.on = v; RefreshFPS() end },
+        { "toggle", "Show FPS counter", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "label", "คำเตือน: ยังมีบัค", "ใช้งานไม่ค่อยได้ Walkfling ยังอยู่ระหว่างปรับปรุง" },
-        { "toggle", "Walkfling ฆาตกร", "วาปทั้งตัวละครและ hitbox ไปเตะฆาตกรให้กระเด็นไกล จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
-        { "toggle", "Walkfling มือปืน", "วาปทั้งตัวละครและ hitbox ไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
-        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปทั้งตัวละครและ hitbox ไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
+        { "label", "Warning: still buggy", "Hard to use. Walkfling is still being improved" },
+        { "toggle", "Walkfling Murderer", "Teleports your whole character and hitbox to kick the murderer far away, then returns to your original spot", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling Sheriff", "Teleports your whole character and hitbox to kick whoever holds the gun (Sheriff / Hero)", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling Whole Server", "Teleports your whole character and hitbox to kick everyone alive, one at a time", false, function(v) S.FlingAll = v end },
     } },
-    { name = "อื่นๆ", icon = "settings", items = {
-        { "dropdown", "พื้นหลังเมนู", { "พื้นหลัง 1", "พื้นหลัง 2" }, "พื้นหลัง 1", function(v) ApplyBackground(v == "พื้นหลัง 2" and 2 or 1) end },
-        { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
-        { "button", "ปิดสคริปต์ (Unload)", "ล้างทุกอย่างและคืนค่ากราฟิก", function() Unload() end },
+    { name = "Others", icon = "settings", items = {
+        { "dropdown", "Menu background", { "Background 1", "Background 2" }, "Background 1", function(v) ApplyBackground(v == "Background 2" and 2 or 1) end },
+        { "button", "System check", "Check whether role / hook / args / GunDrop are working", function() Notify("System status", Diag() .. " | Shoot mode: " .. S.ShootMode) end },
+        { "button", "Unload script", "Clears everything and restores graphics", function() Unload() end },
     } },
 }
 
@@ -2131,7 +2131,7 @@ local function RenderFallback()
     main.Parent = Gui
     local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0, 10); mc.Parent = main
 
-    -- พื้นหลังรูปของเมนูสำรอง (อยู่หลังปุ่มทั้งหมด)
+    -- Fallback menu background image (behind all buttons)
     local bgImg = Instance.new("ImageLabel")
     bgImg.Name = "Bg"
     bgImg.Size = UDim2.fromScale(1, 1)
@@ -2147,7 +2147,7 @@ local function RenderFallback()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "MM2 HUB (UI สำรอง) - ลากเพื่อย้าย"
+    title.Text = "MM2 HUB (fallback UI) - drag to move"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 14
@@ -2237,9 +2237,9 @@ task.spawn(function()
     if WindUI then rendered = RenderWind(WindUI) end
     if not rendered then
         RenderFallback()
-        Notify("MM2 HUB", "โหลด WindUI ไม่ได้ ใช้ UI สำรองแทน")
+        Notify("MM2 HUB", "Could not load WindUI, using the fallback UI instead")
     else
-        Notify("MM2 HUB v10", "โหลดสำเร็จ (RightShift = ซ่อน/แสดงเมนู)")
+        Notify("MM2 HUB v10", "Loaded successfully (RightShift = hide/show menu)")
     end
 end)
 
