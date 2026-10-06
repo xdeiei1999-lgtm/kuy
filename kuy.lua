@@ -1259,7 +1259,7 @@ end)
 -- ============================================================
 -- Walkfling (เปิด/ปิดแยกกัน): ฆาตกร / มือปืน / ทั้งเซิร์ฟ
 --   ตัวเราไม่วาป: เดินเข้าไปใกล้เป้า เมื่อ hitbox ชนกัน เป้าจะกระเด็นออกไป
---   ใช้ความเร็วสูงสั้นๆ ทุกเฟรมเฉพาะตอนอยู่ใกล้เป้าที่เลือก (เดินปกติได้เมื่อไม่มีใครใกล้)
+--   เตะ: ตอน hitbox ชนเป้าที่เลือก ส่งแรงสูงมากไปทางเป้า (เดินปกติได้เมื่อไม่ได้ชน)
 -- ============================================================
 local function FlingOn() return S.FlingMurd or S.FlingSheriff or S.FlingAll end
 
@@ -1302,13 +1302,31 @@ local function FlingHeavy(char)
     end
 end
 
-local function FlingNear(myHrp)
+-- หาเป้าที่อยู่ใกล้ และเช็กว่า hitbox ชนกับตัวเราหรือยัง (รัศมี 4.5 studs รอบตัว เผื่อจังหวะก่อนชน)
+local function FlingContact(myHrp)
+    local chars, byChar = {}, {}
+    local nearest, nd = nil, math.huge
     for _, t in ipairs(FlingTargets()) do
-        if t.hrp.Parent and (t.hrp.Position - myHrp.Position).Magnitude <= FLING_RANGE then
-            return true
+        if t.hrp.Parent then
+            local d = (t.hrp.Position - myHrp.Position).Magnitude
+            if d <= FLING_RANGE then
+                chars[#chars + 1] = t.hrp.Parent
+                byChar[t.hrp.Parent] = t
+                if d < nd then nearest, nd = t, d end
+            end
         end
     end
-    return false
+    if #chars == 0 then return nil, false end
+
+    local op = OverlapParams.new()
+    op.FilterType = Enum.RaycastFilterType.Include
+    op.FilterDescendantsInstances = chars
+    local ok, parts = pcall(function() return Workspace:GetPartBoundsInRadius(myHrp.Position, 4.5, op) end)
+    if ok and parts and #parts > 0 then
+        local m = parts[1]:FindFirstAncestorOfClass("Model")
+        return (m and byChar[m]) or nearest, true
+    end
+    return nearest, false
 end
 
 task.spawn(function()
@@ -1320,10 +1338,15 @@ task.spawn(function()
             local myHrp = char and char:FindFirstChild("HumanoidRootPart")
             if hum and myHrp and hum.Health > 0 then
                 if FlingSt.char ~= char then FlingHeavy(char) end
-                if FlingNear(myHrp) then
-                    -- walkfling: สั่งความเร็วสูงมากเฟรมเดียว แล้วคืนความเร็วจริง ทำซ้ำทุกเฟรม
+                local tgt, touching = FlingContact(myHrp)
+                if tgt and touching then
+                    -- เตะ: ส่งแรงสูงมากพุ่งจากตัวเราไปทางเป้า (กระเด็นออกจากตัวเรา) + ยกขึ้นเล็กน้อย
+                    local away = tgt.hrp.Position - myHrp.Position
+                    away = Vector3.new(away.X, 0, away.Z)
+                    if away.Magnitude < 0.1 then away = myHrp.CFrame.LookVector end
+                    local kick = away.Unit * 1e5 + Vector3.new(0, 3e4, 0)
                     local vel = myHrp.AssemblyLinearVelocity
-                    myHrp.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+                    myHrp.AssemblyLinearVelocity = kick
                     myHrp.AssemblyAngularVelocity = Vector3.new(0, 9e5, 0)
                     RunService.RenderStepped:Wait()
                     myHrp.AssemblyLinearVelocity = vel
@@ -1940,9 +1963,9 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "toggle", "Walkfling ฆาตกร", "เดินเข้าไปชน hitbox ฆาตกร เขาจะกระเด็นออกไป (ไม่วาป)", false, function(v) S.FlingMurd = v end },
-        { "toggle", "Walkfling มือปืน", "เดินเข้าไปชน hitbox คนที่ถือปืน (Sheriff / Hero) เขาจะกระเด็น", false, function(v) S.FlingSheriff = v end },
-        { "toggle", "Walkfling ทั้งเซิร์ฟ", "เดินเข้าไปชน hitbox ใครก็ได้ที่ยังมีชีวิต เขาจะกระเด็น", false, function(v) S.FlingAll = v end },
+        { "toggle", "Walkfling ฆาตกร", "เดินเข้าไปชน/เตะฆาตกร เขาจะกระเด็นออกจากตัวคุณ (ไม่วาป)", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling มือปืน", "เดินเข้าไปชน/เตะคนที่ถือปืน (Sheriff / Hero) เขาจะกระเด็น", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling ทั้งเซิร์ฟ", "เดินเข้าไปชน/เตะใครก็ได้ที่ยังมีชีวิต เขาจะกระเด็น", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
