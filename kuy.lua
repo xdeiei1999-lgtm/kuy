@@ -1836,7 +1836,6 @@ local Spec = {
         { "button", "สลับโหมดยิง (โหมด 1 / โหมด 2)", "โหมด 1 ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง) / โหมด 2 ยิงทะลุกำแพง", ToggleShootMode },
         { "dropdown", "จุดเล็ง", { "Torso", "Head" }, "Torso", function(v) S.AimPart = v end },
         { "dropdown", "รูปแบบ args (ใช้เมื่อยังไม่เคยยิงเอง)", { "CFrame, CFrame", "Vector3 (เป้า)", "Vector3 (ต้นทาง, เป้า)" }, "CFrame, CFrame", function(v) S.ArgMode = v end },
-        { "button", "ยิงฆาตกรทันที", nil, function() task.spawn(ShootMurderer) end },
     } },
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
