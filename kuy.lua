@@ -1948,19 +1948,24 @@ local function Diag()
 end
 
 -- ============================================================
--- Menu background: 3 images (selectable in the Others tab)
+-- Menu background: 4 images (selectable in the Others tab)
 -- ============================================================
 -- Background 1 = Texture 14751314324 (usable directly as an image)
 -- Background 2 = Asset (Decal) 14751314303 (must be converted to the real image first, otherwise it will not show)
 local BG_TEXTURE_ID = 14751314324
 local BG_ASSET_ID = 14751314303
--- Background 3 = Texture 130393160784262 (used directly); Asset (Decal) 134393565381500 is the fallback
+-- Backgrounds 3 and 4: the Texture is used directly; the Asset (Decal) is the fallback
 --   if the texture fails to load (the Decal is converted to its real image)
-local BG3_TEXTURE_ID = 130393160784262
-local BG3_ASSET_ID = 134393565381500
-local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID, "rbxassetid://" .. BG3_TEXTURE_ID }
+local BG_EXTRA = {
+    [3] = { tex = 130393160784262, asset = 134393565381500, checked = false },
+    [4] = { tex = 90431130411810,  asset = 76524641175461,  checked = false },
+}
+local BG_IDS = {
+    "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID,
+    "rbxassetid://" .. BG_EXTRA[3].tex, "rbxassetid://" .. BG_EXTRA[4].tex,
+}
+local BG_NAMES = { ["Background 1"] = 1, ["Background 2"] = 2, ["Background 3"] = 3, ["Background 4"] = 4 }
 local BgAssetResolved = false
-local Bg3Checked = false
 local BG_ALPHA = 0.5          -- image transparency (0 = clearest, 1 = invisible)
 local BgIndex = 1
 local FallbackBgImg = nil     -- ImageLabel of the fallback menu (set when the fallback menu is built)
@@ -1999,20 +2004,21 @@ end
 
 local function ApplyBackground(idx)
     BgIndex = idx
-    -- Background 3: use the texture; if it does not load, fall back to converting the asset (Decal)
-    if idx == 3 and not Bg3Checked then
-        Bg3Checked = true
+    -- Backgrounds 3 / 4: use the texture; if it does not load, fall back to the asset (Decal)
+    local ex = BG_EXTRA[idx]
+    if ex and not ex.checked then
+        ex.checked = true
         task.spawn(function()
-            if not ImageLoads(BG_IDS[3]) then
+            if not ImageLoads(BG_IDS[idx]) then
                 -- 1) convert the Decal asset to its real image  2) otherwise try the asset id directly
-                local img = ResolveDecalImage(BG3_ASSET_ID)
+                local img = ResolveDecalImage(ex.asset)
                 if img then
-                    BG_IDS[3] = img
-                elseif ImageLoads("rbxassetid://" .. BG3_ASSET_ID) then
-                    BG_IDS[3] = "rbxassetid://" .. BG3_ASSET_ID
+                    BG_IDS[idx] = img
+                elseif ImageLoads("rbxassetid://" .. ex.asset) then
+                    BG_IDS[idx] = "rbxassetid://" .. ex.asset
                 end
             end
-            if BgIndex == 3 then ApplyBackground(3) end
+            if BgIndex == idx then ApplyBackground(idx) end
         end)
     end
     -- Background 2 (Asset): convert to the real image the first time it's selected, then set the image
@@ -2086,7 +2092,7 @@ local Spec = {
         { "toggle", "Walkfling Whole Server", "Teleports your whole character and hitbox to kick everyone alive, one at a time", false, function(v) S.FlingAll = v end },
     } },
     { name = "Others", icon = "settings", items = {
-        { "dropdown", "Menu background", { "Background 1", "Background 2", "Background 3" }, "Background 1", function(v) ApplyBackground(v == "Background 3" and 3 or (v == "Background 2" and 2 or 1)) end },
+        { "dropdown", "Menu background", { "Background 1", "Background 2", "Background 3", "Background 4" }, "Background 1", function(v) ApplyBackground(BG_NAMES[v] or 1) end },
         { "button", "System check", "Check whether role / hook / args / GunDrop are working", function() Notify("System status", Diag() .. " | Shoot mode: " .. S.ShootMode) end },
         { "button", "Unload script", "Clears everything and restores graphics", function() Unload() end },
     } },
