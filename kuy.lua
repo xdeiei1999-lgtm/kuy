@@ -1994,7 +1994,7 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "label", "ยังมีบัค", "Walkfling ยังอยู่ระหว่างปรับปรุง ใช้แล้วอาจทำงานไม่สมบูรณ์" },
+        { "label", "คำเตือน: ยังมีบัค", "ใช้งานไม่ค่อยได้ Walkfling ยังอยู่ระหว่างปรับปรุง" },
         { "toggle", "Walkfling ฆาตกร", "วาปทั้งตัวละครและ hitbox ไปเตะฆาตกรให้กระเด็นไกล จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
         { "toggle", "Walkfling มือปืน", "วาปทั้งตัวละครและ hitbox ไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
         { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปทั้งตัวละครและ hitbox ไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
