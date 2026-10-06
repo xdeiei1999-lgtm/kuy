@@ -64,6 +64,8 @@ local S = {
     KillDelay = 250, KillRetries = 3, KillReturn = true,
     AutoKill = false,   -- ฆ่าอัตโนมัติเมื่อถือมีด (ไม่วาป)
     FlingMurd = false, FlingSheriff = false, FlingAll = false,   -- Walkfling
+    AimbotOn = false, AimbotPart = "Head", AimbotPower = 60,
+    AimbotNeedGun = true, AimbotLOS = false, AimbotLead = true,   -- Aimbot
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
 local KnifeTpl = {}   -- args ที่เกมใช้กับ Knife.Events.* (จับอัตโนมัติ)
@@ -1315,6 +1317,53 @@ task.spawn(function()
 end)
 
 -- ============================================================
+-- Aimbot (มือปืน): ล็อกกล้องไปที่ฆาตกรเท่านั้น (ไม่ล็อกคนอื่นเลย)
+-- ============================================================
+local AIMBOT_BIND = "MM2HubAimbot"
+
+local function AimbotStep()
+    if not (S.AimbotOn and Alive) then return end
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not (hum and hum.Health > 0) then return end
+    if S.AimbotNeedGun and not char:FindFirstChild("Gun") then return end
+
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+
+    local plr = GetMurderer()                       -- ล็อกเฉพาะฆาตกร
+    local tChar = plr and plr.Character
+    local hrp = tChar and tChar:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local part
+    if S.AimbotPart == "Head" then
+        part = tChar:FindFirstChild("Head")
+    else
+        part = tChar:FindFirstChild("UpperTorso") or tChar:FindFirstChild("Torso")
+    end
+    part = part or hrp
+
+    local pos = part.Position
+    if S.AimbotLead then
+        local ping = 0
+        pcall(function() ping = LP:GetNetworkPing() end)
+        pos = pos + PredictOffset(plr, tChar, ping + 0.05, 3)
+    end
+
+    if S.AimbotLOS and not HasLineOfSight(cam.CFrame.Position, pos) then return end
+
+    local alpha = math.clamp((S.AimbotPower or 60) / 100, 0.05, 1)
+    local goal = CFrame.lookAt(cam.CFrame.Position, pos)
+    cam.CFrame = (alpha >= 1) and goal or cam.CFrame:Lerp(goal, alpha)
+end
+
+pcall(function() RunService:UnbindFromRenderStep(AIMBOT_BIND) end)
+RunService:BindToRenderStep(AIMBOT_BIND, Enum.RenderPriority.Camera.Value + 1, function()
+    pcall(AimbotStep)
+end)
+
+-- ============================================================
 -- Hook: จับรูปแบบ args จริงของเกม
 -- ============================================================
 local HookOK = false
@@ -1787,6 +1836,8 @@ local function Unload()
     S.ESP = false
     S.AutoKill = false
     S.FlingMurd, S.FlingSheriff, S.FlingAll = false, false, false
+    S.AimbotOn = false
+    pcall(function() RunService:UnbindFromRenderStep(AIMBOT_BIND) end)
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
     DestroyAllESP()
     ClearDropESP()
@@ -1836,6 +1887,14 @@ local Spec = {
         { "button", "สลับโหมดยิง (โหมด 1 / โหมด 2)", "โหมด 1 ยิงไม่ทะลุ (ต้องไม่มีกำแพงบัง) / โหมด 2 ยิงทะลุกำแพง", ToggleShootMode },
         { "dropdown", "จุดเล็ง", { "Torso", "Head" }, "Torso", function(v) S.AimPart = v end },
         { "dropdown", "รูปแบบ args (ใช้เมื่อยังไม่เคยยิงเอง)", { "CFrame, CFrame", "Vector3 (เป้า)", "Vector3 (ต้นทาง, เป้า)" }, "CFrame, CFrame", function(v) S.ArgMode = v end },
+    } },
+    { name = "Aimbot", icon = "target", items = {
+        { "toggle", "Aimbot ล็อกฆาตกร", "ล็อกกล้องไปที่ฆาตกรเท่านั้น ไม่ล็อกผู้เล่นคนอื่น", false, function(v) S.AimbotOn = v end },
+        { "dropdown", "จุดล็อก", { "Head", "Torso" }, "Head", function(v) S.AimbotPart = v end },
+        { "slider", "ความแรงล็อก (%) 100 = ล็อกทันที", 5, 100, 60, 5, function(v) S.AimbotPower = v end },
+        { "toggle", "ล็อกเฉพาะตอนถือปืน", nil, true, function(v) S.AimbotNeedGun = v end },
+        { "toggle", "เล็งนำ (ชดเชยการเคลื่อนที่)", nil, true, function(v) S.AimbotLead = v end },
+        { "toggle", "ล็อกเฉพาะตอนไม่มีกำแพงบัง", "ถ้าฆาตกรอยู่หลังกำแพงจะไม่ล็อก", false, function(v) S.AimbotLOS = v end },
     } },
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
