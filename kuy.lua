@@ -65,7 +65,7 @@ local S = {
     AutoKill = false,   -- ฆ่าอัตโนมัติเมื่อถือมีด (ไม่วาป)
     FlingMurd = false, FlingSheriff = false, FlingAll = false,   -- Walkfling
     AimbotOn = false, AimbotPart = "Head", AimbotPower = 60,
-    AimbotNeedGun = true, AimbotPrecise = true, AimbotLeadPower = 100,   -- Aimbot
+    AimbotNeedGun = true,   -- Aimbot
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
 local KnifeTpl = {}   -- args ที่เกมใช้กับ Knife.Events.* (จับอัตโนมัติ)
@@ -604,7 +604,13 @@ local function HitsOthers(fromPos, toPos, murdererChar)
     local rp = RaycastParams.new()
     rp.FilterType = Enum.RaycastFilterType.Include
     rp.FilterDescendantsInstances = list
-    if Workspace:Raycast(fromPos, toPos - fromPos, rp) then return true end
+    local dir = toPos - fromPos
+    if dir.Magnitude > 0.01 then
+        -- Spherecast รัศมี 0.3 ให้มีระยะเผื่อรอบเส้นกระสุน (ถ้าไม่รองรับใช้ Raycast)
+        local done, hit = pcall(function() return Workspace:Spherecast(fromPos, 0.3, dir, rp) end)
+        if not done then hit = Workspace:Raycast(fromPos, dir, rp) end
+        if hit then return true end
+    end
 
     local op = OverlapParams.new()
     op.FilterType = Enum.RaycastFilterType.Include
@@ -656,21 +662,28 @@ local function ComputeShot(target, myHrp)
             pts = r
         end
 
-        -- ลองจุดเล็งหลายจุด x ต้นทางหลายทิศรอบฆาตกร เลือกชุดแรกที่กระสุนไม่ผ่านตัวคนอื่นเลย
+        -- กระสุนวาปไปติด hitbox ฆาตกร: ลองต้นทางจาก "ใกล้มาก" ไปไกลขึ้นทีละระดับ (0.5 -> 2.5 studs)
+        -- หลายทิศรอบจุดเล็ง เลือกชุดแรกที่เส้นกระสุน + ต้นทาง + จุดเล็ง ไม่แตะ hitbox ใครนอกจากฆาตกร
         local cf = hrp.CFrame
+        local dists = { 0.5, 1.0, 1.6, 2.5 }
         for _, base in ipairs(pts) do
             local p = base + off2
-            local origins = {
-                NearOrigin(myHrp.Position, p),
-                p + Vector3.new(0, 3, 0),
-                (cf * CFrame.new(0, 0, -2.5)).Position,
-                (cf * CFrame.new(0, 0, 2.5)).Position,
-                (cf * CFrame.new(2.5, 0, 0)).Position,
-                (cf * CFrame.new(-2.5, 0, 0)).Position,
-                p + Vector3.new(0, 5, 0),
-            }
-            for _, o in ipairs(origins) do
-                if not HitsOthers(o, p, char) then return o, p end
+            local toMe = myHrp.Position - p
+            local dirs = {}
+            if toMe.Magnitude > 0.1 then dirs[#dirs + 1] = toMe.Unit end
+            dirs[#dirs + 1] = Vector3.yAxis
+            dirs[#dirs + 1] = cf.LookVector
+            dirs[#dirs + 1] = -cf.LookVector
+            dirs[#dirs + 1] = cf.RightVector
+            dirs[#dirs + 1] = -cf.RightVector
+            dirs[#dirs + 1] = (Vector3.yAxis + cf.LookVector).Unit
+            dirs[#dirs + 1] = (Vector3.yAxis - cf.LookVector).Unit
+            dirs[#dirs + 1] = -Vector3.yAxis
+            for _, d in ipairs(dists) do
+                for _, dir in ipairs(dirs) do
+                    local o = p + dir * d
+                    if not HitsOthers(o, p, char) then return o, p end
+                end
             end
         end
         return nil, nil, "crowded"
@@ -1245,8 +1258,8 @@ end)
 
 -- ============================================================
 -- Walkfling (เปิด/ปิดแยกกัน): ฆาตกร / มือปืน / ทั้งเซิร์ฟ
---   ตัวเราวาปไปติดตัวเป้าทีละคน ปั่นความเร็วสูงมากให้เป้ากระเด็น
---   จบรอบแล้วกลับตำแหน่งเดิมของรอบนั้น  ปิดสวิตช์ทั้งหมดแล้วหยุดทันที
+--   ตัวเราไม่วาป: เดินเข้าไปใกล้เป้า เมื่อ hitbox ชนกัน เป้าจะกระเด็นออกไป
+--   ใช้ความเร็วสูงสั้นๆ ทุกเฟรมเฉพาะตอนอยู่ใกล้เป้าที่เลือก (เดินปกติได้เมื่อไม่มีใครใกล้)
 -- ============================================================
 local function FlingOn() return S.FlingMurd or S.FlingSheriff or S.FlingAll end
 
@@ -1266,133 +1279,76 @@ local function FlingTargets()
     return list
 end
 
--- เหวี่ยงเป้า 1 คน: ทำตัวเราให้ "หนักมาก" + แรงผลัก/ความเร็วสูงสุด แล้วเกาะตัวเป้าทุกเฟรม
--- (วนหลายมุมเพื่อให้ชนแน่) จนเป้ากระเด็นไกลหรือหมดเวลา
-local FlingOffsets = {
-    Vector3.new(0, 1.5, 0), Vector3.new(0, -1.5, 0),
-    Vector3.new(0, 0, 1.5), Vector3.new(0, 0, -1.5),
-    Vector3.new(1.5, 0, 0), Vector3.new(-1.5, 0, 0),
-}
+local FlingSt = { char = nil, saved = {} }
+local FLING_RANGE = 7   -- ระยะ (studs) ที่เริ่มทำงานเมื่อเข้าใกล้เป้า
 
-local function FlingOne(t, myHrp, char)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local startPos = t.hrp.Position
-    local saved = {}
+-- ทำตัวเราหนักสุดเพื่อให้แรงชนถ่ายไปที่เป้ามากที่สุด
+local function FlingRestore()
+    for d, props in pairs(FlingSt.saved) do
+        pcall(function() d.CustomPhysicalProperties = props end)
+    end
+    FlingSt.saved = {}
+    FlingSt.char = nil
+end
 
-    -- ทำตัวเราหนักสุด ลื่น ไม่ชนพื้น
+local function FlingHeavy(char)
+    FlingRestore()
+    FlingSt.char = char
     for _, d in ipairs(char:GetDescendants()) do
         if d:IsA("BasePart") then
-            saved[d] = d.CustomPhysicalProperties
+            FlingSt.saved[d] = d.CustomPhysicalProperties
             pcall(function() d.CustomPhysicalProperties = PhysicalProperties.new(math.huge, 0.3, 0.5) end)
         end
     end
-    local thrust = Instance.new("BodyThrust")
-    thrust.Force = Vector3.new(9e8, 9e8, 9e8)
-    thrust.Location = myHrp.Position
-    thrust.Parent = myHrp
-    if hum then hum.PlatformStand = true end
+end
 
-    local t0 = os.clock()
-    local i = 0
-    while Alive and FlingOn() and os.clock() - t0 < 2.0 do
-        local hrp = t.hrp
-        if not (hrp.Parent and myHrp.Parent) then break end
-        -- สำเร็จ: เป้ากระเด็นออกไปไกลหรือเร็วมากแล้ว
-        if (hrp.Position - startPos).Magnitude > 150 or hrp.AssemblyLinearVelocity.Magnitude > 500 then break end
-        if hum and hum.Health <= 0 then break end
-
-        i = i % #FlingOffsets + 1
-        -- เกาะตำแหน่งเป้า (ล่วงหน้าตามความเร็วเป้าเล็กน้อย)
-        local ahead = hrp.AssemblyLinearVelocity * 0.1
-        myHrp.CFrame = hrp.CFrame * CFrame.new(FlingOffsets[i]) * CFrame.new(ahead)
-        for _, d in ipairs(char:GetChildren()) do
-            if d:IsA("BasePart") and d ~= myHrp then d.CanCollide = false end
+local function FlingNear(myHrp)
+    for _, t in ipairs(FlingTargets()) do
+        if t.hrp.Parent and (t.hrp.Position - myHrp.Position).Magnitude <= FLING_RANGE then
+            return true
         end
-        myHrp.AssemblyLinearVelocity = Vector3.new(9e7, 9e8, 9e7)
-        myHrp.AssemblyAngularVelocity = Vector3.new(9e8, 9e8, 9e8)
-        RunService.Heartbeat:Wait()
-        myHrp.CFrame = hrp.CFrame * CFrame.new(FlingOffsets[(i % #FlingOffsets) + 1])
-        myHrp.AssemblyLinearVelocity = Vector3.new(-9e7, -9e8, -9e7)
-        RunService.Stepped:Wait()
     end
-
-    -- คืนค่า
-    pcall(function() thrust:Destroy() end)
-    for d, props in pairs(saved) do
-        pcall(function() d.CustomPhysicalProperties = props end)
-    end
-    if hum then hum.PlatformStand = false end
-    myHrp.AssemblyLinearVelocity = Vector3.zero
-    myHrp.AssemblyAngularVelocity = Vector3.zero
+    return false
 end
 
 task.spawn(function()
+    local flip = 1
     while Alive do
         if FlingOn() then
             local char = LP.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             local myHrp = char and char:FindFirstChild("HumanoidRootPart")
             if hum and myHrp and hum.Health > 0 then
-                local list = FlingTargets()
-                if #list > 0 then
-                    local home = myHrp.CFrame
-                    for _, t in ipairs(list) do
-                        if not (Alive and FlingOn()) then break end
-                        pcall(FlingOne, t, myHrp, char)
-                    end
-                    -- กลับที่เดิม: ย้ำตำแหน่งหลายเฟรมกันตัวเราลอยตามแรงที่เหลือ
-                    for _ = 1, 8 do
-                        if not myHrp.Parent then break end
-                        myHrp.AssemblyLinearVelocity = Vector3.zero
-                        myHrp.AssemblyAngularVelocity = Vector3.zero
-                        myHrp.CFrame = home
-                        RunService.Heartbeat:Wait()
-                    end
-                    task.wait(0.15)
+                if FlingSt.char ~= char then FlingHeavy(char) end
+                if FlingNear(myHrp) then
+                    -- walkfling: สั่งความเร็วสูงมากเฟรมเดียว แล้วคืนความเร็วจริง ทำซ้ำทุกเฟรม
+                    local vel = myHrp.AssemblyLinearVelocity
+                    myHrp.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+                    myHrp.AssemblyAngularVelocity = Vector3.new(0, 9e5, 0)
+                    RunService.RenderStepped:Wait()
+                    myHrp.AssemblyLinearVelocity = vel
+                    RunService.Stepped:Wait()
+                    flip = -flip
+                    myHrp.AssemblyLinearVelocity = vel + Vector3.new(0, 0.1 * flip, 0)
+                    myHrp.AssemblyAngularVelocity = Vector3.zero
                 else
-                    task.wait(0.4)
+                    RunService.Heartbeat:Wait()
                 end
             else
-                task.wait(0.4)
+                task.wait(0.3)
             end
         else
+            if FlingSt.char then FlingRestore() end
             task.wait(0.3)
         end
     end
+    FlingRestore()
 end)
 
 -- ============================================================
 -- Aimbot (มือปืน): ล็อกกล้องไปที่ฆาตกรเท่านั้น (ไม่ล็อกคนอื่นเลย)
 -- ============================================================
 local AIMBOT_BIND = "MM2HubAimbot"
-
--- เล็งนำแบบใหม่: รวม ping + ดีเลย์การแสดงผล + เวลากระสุนบิน (ตามระยะ)
--- พื้น: ใช้ความเร็วแนวราบ / กลางอากาศ: เพิ่มวิถีโค้งตามแรงโน้มถ่วง
-local function AimLeadOffset(plr, tChar, part, camPos)
-    local hrp = tChar:FindFirstChild("HumanoidRootPart")
-    if not hrp then return Vector3.zero end
-    local rec = VelTrack[plr]
-    local v = rec and rec.vel or hrp.AssemblyLinearVelocity
-    if v.Magnitude < 0.5 then v = hrp.AssemblyLinearVelocity end
-    if v.Magnitude > 120 then return Vector3.zero end     -- โดนเหวี่ยง/ความเร็วผิดปกติ
-
-    local ping = 0
-    pcall(function() ping = LP:GetNetworkPing() end)
-    local dist = (part.Position - camPos).Magnitude
-    local t = math.min(ping + 0.06 + dist / 600, 0.7) * math.clamp((S.AimbotLeadPower or 100) / 100, 0, 1.5)
-    if t <= 0 then return Vector3.zero end
-
-    local hum = tChar:FindFirstChildOfClass("Humanoid")
-    local grounded = hum ~= nil and hum.FloorMaterial ~= Enum.Material.Air
-    local horiz = Vector3.new(v.X, 0, v.Z) * t
-    if horiz.Magnitude > 14 then horiz = horiz.Unit * 14 end
-    local vert = 0
-    if not grounded then
-        vert = v.Y * t - 0.5 * Workspace.Gravity * t * t
-        vert = math.clamp(vert, -8, 8)
-    end
-    return horiz + Vector3.new(0, vert, 0)
-end
 
 local function AimbotStep(dt)
     if not (S.AimbotOn and Alive) then return end
@@ -1418,25 +1374,9 @@ local function AimbotStep(dt)
     part = part or hrp
 
     local camPos = cam.CFrame.Position
-    local pos = part.Position + AimLeadOffset(plr, tChar, part, camPos)
-    local goal = CFrame.lookAt(camPos, pos)
-
+    local goal = CFrame.lookAt(camPos, part.Position)
     local p = math.clamp((S.AimbotPower or 60) / 100, 0.05, 1)
-    if S.AimbotPrecise then
-        -- เล็งแม่นขึ้น: ความนุ่มไม่ขึ้นกับเฟรมเรต + เข้าใกล้เป้าแล้วล็อกติดไม่สั่น
-        local ang = math.acos(math.clamp(cam.CFrame.LookVector:Dot(goal.LookVector), -1, 1))
-        if ang < math.rad(0.35) or p >= 1 then
-            cam.CFrame = goal
-        else
-            local f = (dt or 1 / 60) * 60
-            local alpha = 1 - (1 - p) ^ f
-            -- ยิ่งห่างจากเป้ายิ่งดูดเร็ว (ไม่เกิน 1)
-            alpha = math.min(1, alpha * (1 + math.min(ang / math.rad(30), 1)))
-            cam.CFrame = cam.CFrame:Lerp(goal, alpha)
-        end
-    else
-        cam.CFrame = (p >= 1) and goal or cam.CFrame:Lerp(goal, p)
-    end
+    cam.CFrame = (p >= 1) and goal or cam.CFrame:Lerp(goal, p)
 end
 
 pcall(function() RunService:UnbindFromRenderStep(AIMBOT_BIND) end)
@@ -1917,6 +1857,7 @@ local function Unload()
     S.ESP = false
     S.AutoKill = false
     S.FlingMurd, S.FlingSheriff, S.FlingAll = false, false, false
+    pcall(FlingRestore)
     S.AimbotOn = false
     pcall(function() RunService:UnbindFromRenderStep(AIMBOT_BIND) end)
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
@@ -1974,8 +1915,6 @@ local Spec = {
         { "dropdown", "จุดล็อก", { "Head", "Torso" }, "Head", function(v) S.AimbotPart = v end },
         { "slider", "ความแรงล็อก (%) 100 = ล็อกทันที", 5, 100, 60, 5, function(v) S.AimbotPower = v end },
         { "toggle", "ล็อกเฉพาะตอนถือปืน", nil, true, function(v) S.AimbotNeedGun = v end },
-        { "toggle", "เล็งแม่นขึ้น (นุ่มคงที่ทุกเฟรมเรต + ล็อกติดไม่สั่น)", "ความนุ่มไม่ขึ้นกับ FPS ยิ่งห่างเป้ายิ่งดูดเร็ว เข้าใกล้แล้วล็อกตรง", true, function(v) S.AimbotPrecise = v end },
-        { "slider", "ความแรงเล็งนำ (%) 100 = ปกติ", 0, 150, 100, 10, function(v) S.AimbotLeadPower = v end },
     } },
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
@@ -2001,9 +1940,9 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
-        { "toggle", "Walkfling ฆาตกร", "วาปไปชนฆาตกรด้วยแรงสูงสุดให้กระเด็นออกนอกแมพ จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
-        { "toggle", "Walkfling มือปืน", "ทำกับคนที่ถือปืน (Sheriff / Hero)", false, function(v) S.FlingSheriff = v end },
-        { "toggle", "Walkfling ทั้งเซิร์ฟ", "วนทำกับทุกคนที่ยังมีชีวิตทีละคน", false, function(v) S.FlingAll = v end },
+        { "toggle", "Walkfling ฆาตกร", "เดินเข้าไปชน hitbox ฆาตกร เขาจะกระเด็นออกไป (ไม่วาป)", false, function(v) S.FlingMurd = v end },
+        { "toggle", "Walkfling มือปืน", "เดินเข้าไปชน hitbox คนที่ถือปืน (Sheriff / Hero) เขาจะกระเด็น", false, function(v) S.FlingSheriff = v end },
+        { "toggle", "Walkfling ทั้งเซิร์ฟ", "เดินเข้าไปชน hitbox ใครก็ได้ที่ยังมีชีวิต เขาจะกระเด็น", false, function(v) S.FlingAll = v end },
     } },
     { name = "อื่นๆ", icon = "settings", items = {
         { "button", "ตรวจสอบระบบ", "ดูว่า role / hook / args / GunDrop ใช้งานได้ไหม", function() Notify("สถานะระบบ", Diag() .. " | โหมดยิง: " .. S.ShootMode) end },
