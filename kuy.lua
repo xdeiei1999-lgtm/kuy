@@ -65,7 +65,7 @@ local S = {
     AutoKill = false,   -- ฆ่าอัตโนมัติเมื่อถือมีด (ไม่วาป)
     FlingMurd = false, FlingSheriff = false, FlingAll = false,   -- Walkfling
     AimbotOn = false, AimbotPart = "Head", AimbotPower = 60,
-    AimbotNeedGun = true, AimbotLOS = false, AimbotLead = true,   -- Aimbot
+    AimbotNeedGun = true, AimbotPrecise = true, AimbotLeadPower = 100,   -- Aimbot
     GunTpl = nil,     -- args ที่เกมใช้ยิงปืนจริง (จับอัตโนมัติ)
 }
 local KnifeTpl = {}   -- args ที่เกมใช้กับ Knife.Events.* (จับอัตโนมัติ)
@@ -1321,7 +1321,35 @@ end)
 -- ============================================================
 local AIMBOT_BIND = "MM2HubAimbot"
 
-local function AimbotStep()
+-- เล็งนำแบบใหม่: รวม ping + ดีเลย์การแสดงผล + เวลากระสุนบิน (ตามระยะ)
+-- พื้น: ใช้ความเร็วแนวราบ / กลางอากาศ: เพิ่มวิถีโค้งตามแรงโน้มถ่วง
+local function AimLeadOffset(plr, tChar, part, camPos)
+    local hrp = tChar:FindFirstChild("HumanoidRootPart")
+    if not hrp then return Vector3.zero end
+    local rec = VelTrack[plr]
+    local v = rec and rec.vel or hrp.AssemblyLinearVelocity
+    if v.Magnitude < 0.5 then v = hrp.AssemblyLinearVelocity end
+    if v.Magnitude > 120 then return Vector3.zero end     -- โดนเหวี่ยง/ความเร็วผิดปกติ
+
+    local ping = 0
+    pcall(function() ping = LP:GetNetworkPing() end)
+    local dist = (part.Position - camPos).Magnitude
+    local t = math.min(ping + 0.06 + dist / 600, 0.7) * math.clamp((S.AimbotLeadPower or 100) / 100, 0, 1.5)
+    if t <= 0 then return Vector3.zero end
+
+    local hum = tChar:FindFirstChildOfClass("Humanoid")
+    local grounded = hum ~= nil and hum.FloorMaterial ~= Enum.Material.Air
+    local horiz = Vector3.new(v.X, 0, v.Z) * t
+    if horiz.Magnitude > 14 then horiz = horiz.Unit * 14 end
+    local vert = 0
+    if not grounded then
+        vert = v.Y * t - 0.5 * Workspace.Gravity * t * t
+        vert = math.clamp(vert, -8, 8)
+    end
+    return horiz + Vector3.new(0, vert, 0)
+end
+
+local function AimbotStep(dt)
     if not (S.AimbotOn and Alive) then return end
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1344,23 +1372,31 @@ local function AimbotStep()
     end
     part = part or hrp
 
-    local pos = part.Position
-    if S.AimbotLead then
-        local ping = 0
-        pcall(function() ping = LP:GetNetworkPing() end)
-        pos = pos + PredictOffset(plr, tChar, ping + 0.05, 3)
+    local camPos = cam.CFrame.Position
+    local pos = part.Position + AimLeadOffset(plr, tChar, part, camPos)
+    local goal = CFrame.lookAt(camPos, pos)
+
+    local p = math.clamp((S.AimbotPower or 60) / 100, 0.05, 1)
+    if S.AimbotPrecise then
+        -- เล็งแม่นขึ้น: ความนุ่มไม่ขึ้นกับเฟรมเรต + เข้าใกล้เป้าแล้วล็อกติดไม่สั่น
+        local ang = math.acos(math.clamp(cam.CFrame.LookVector:Dot(goal.LookVector), -1, 1))
+        if ang < math.rad(0.35) or p >= 1 then
+            cam.CFrame = goal
+        else
+            local f = (dt or 1 / 60) * 60
+            local alpha = 1 - (1 - p) ^ f
+            -- ยิ่งห่างจากเป้ายิ่งดูดเร็ว (ไม่เกิน 1)
+            alpha = math.min(1, alpha * (1 + math.min(ang / math.rad(30), 1)))
+            cam.CFrame = cam.CFrame:Lerp(goal, alpha)
+        end
+    else
+        cam.CFrame = (p >= 1) and goal or cam.CFrame:Lerp(goal, p)
     end
-
-    if S.AimbotLOS and not HasLineOfSight(cam.CFrame.Position, pos) then return end
-
-    local alpha = math.clamp((S.AimbotPower or 60) / 100, 0.05, 1)
-    local goal = CFrame.lookAt(cam.CFrame.Position, pos)
-    cam.CFrame = (alpha >= 1) and goal or cam.CFrame:Lerp(goal, alpha)
 end
 
 pcall(function() RunService:UnbindFromRenderStep(AIMBOT_BIND) end)
-RunService:BindToRenderStep(AIMBOT_BIND, Enum.RenderPriority.Camera.Value + 1, function()
-    pcall(AimbotStep)
+RunService:BindToRenderStep(AIMBOT_BIND, Enum.RenderPriority.Camera.Value + 1, function(dt)
+    pcall(AimbotStep, dt)
 end)
 
 -- ============================================================
@@ -1893,8 +1929,8 @@ local Spec = {
         { "dropdown", "จุดล็อก", { "Head", "Torso" }, "Head", function(v) S.AimbotPart = v end },
         { "slider", "ความแรงล็อก (%) 100 = ล็อกทันที", 5, 100, 60, 5, function(v) S.AimbotPower = v end },
         { "toggle", "ล็อกเฉพาะตอนถือปืน", nil, true, function(v) S.AimbotNeedGun = v end },
-        { "toggle", "เล็งนำ (ชดเชยการเคลื่อนที่)", nil, true, function(v) S.AimbotLead = v end },
-        { "toggle", "ล็อกเฉพาะตอนไม่มีกำแพงบัง", "ถ้าฆาตกรอยู่หลังกำแพงจะไม่ล็อก", false, function(v) S.AimbotLOS = v end },
+        { "toggle", "เล็งแม่นขึ้น (นุ่มคงที่ทุกเฟรมเรต + ล็อกติดไม่สั่น)", "ความนุ่มไม่ขึ้นกับ FPS ยิ่งห่างเป้ายิ่งดูดเร็ว เข้าใกล้แล้วล็อกตรง", true, function(v) S.AimbotPrecise = v end },
+        { "slider", "ความแรงเล็งนำ (%) 100 = ปกติ", 0, 150, 100, 10, function(v) S.AimbotLeadPower = v end },
     } },
     { name = "ฆาตกร", icon = "skull", items = {
         { "button", "ฆ่าทั้งแมพ (วาปไปหา hitbox)", "วาปไปทีละคน ใกล้สุดก่อน", function() task.spawn(KillAll, false) end },
