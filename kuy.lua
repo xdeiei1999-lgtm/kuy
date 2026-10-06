@@ -1994,6 +1994,7 @@ local Spec = {
         { "toggle", "แสดงตัวเลข FPS", nil, false, function(v) FpsLabel.Visible = v end },
     } },
     { name = "Fling", icon = "wind", items = {
+        { "label", "ยังมีบัค", "Walkfling ยังอยู่ระหว่างปรับปรุง ใช้แล้วอาจทำงานไม่สมบูรณ์" },
         { "toggle", "Walkfling ฆาตกร", "วาปทั้งตัวละครและ hitbox ไปเตะฆาตกรให้กระเด็นไกล จบรอบกลับที่เดิม", false, function(v) S.FlingMurd = v end },
         { "toggle", "Walkfling มือปืน", "วาปทั้งตัวละครและ hitbox ไปเตะคนที่ถือปืน (Sheriff / Hero) ให้กระเด็น", false, function(v) S.FlingSheriff = v end },
         { "toggle", "Walkfling ทั้งเซิร์ฟ", "วาปทั้งตัวละครและ hitbox ไปเตะทุกคนที่ยังมีชีวิตทีละคนให้กระเด็น", false, function(v) S.FlingAll = v end },
@@ -2054,6 +2055,8 @@ local function RenderWind(WindUI)
                         Tab:Dropdown({ Title = it[2], Values = it[3], Value = it[4], Callback = it[5] })
                     elseif kind == "button" then
                         Tab:Button({ Title = it[2], Desc = it[3], Callback = it[4] })
+                    elseif kind == "label" then
+                        Tab:Paragraph({ Title = it[2], Desc = it[3] })
                     end
                 end)
             end
@@ -2149,6 +2152,12 @@ local function RenderFallback()
             elseif kind == "button" then
                 local b = btn(it[2])
                 b.MouseButton1Click:Connect(it[4])
+            elseif kind == "label" then
+                mk("TextLabel", {
+                    Size = UDim2.new(1, -10, 0, 34), BackgroundTransparency = 1,
+                    Text = it[2] .. (it[3] and ("\n" .. it[3]) or ""), TextWrapped = true,
+                    TextColor3 = Color3.fromRGB(255, 120, 120), Font = Enum.Font.GothamBold, TextSize = 12,
+                })
             end
         end
     end
