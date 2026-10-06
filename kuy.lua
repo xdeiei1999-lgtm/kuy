@@ -1,5 +1,5 @@
 --[[
-    MM2 HUB v10  (single file, everything included)
+    NGO PORN HUB V1  (single file, everything included)
     UI: WindUI  (automatically falls back to a built-in UI if it fails to load)
 
     Features
@@ -14,7 +14,7 @@
 ]]
 
 local env = (getgenv and getgenv()) or _G
-if env.MM2HubUnload then pcall(env.MM2HubUnload) end
+if env.NGOPornHubUnload then pcall(env.NGOPornHubUnload) end
 
 -- ============================================================
 -- Services / basics
@@ -37,7 +37,7 @@ local function Connect(signal, fn)
 end
 
 local function RName()
-    return "MM2_" .. tostring(math.random(100000, 999999))
+    return "NGO_" .. tostring(math.random(100000, 999999))
 end
 
 local function SafeParent()
@@ -1402,7 +1402,7 @@ end)
 -- ============================================================
 -- Aimbot (Sheriff): locks the camera onto the murderer only (never locks anyone else)
 -- ============================================================
-local AIMBOT_BIND = "MM2HubAimbot"
+local AIMBOT_BIND = "NGOPornHubAimbot"
 
 local function AimbotStep(dt)
     if not (S.AimbotOn and Alive) then return end
@@ -1926,9 +1926,9 @@ local function Unload()
     pcall(function() Folder:Destroy() end)
     pcall(function() Gui:Destroy() end)
     if WindowObj then pcall(function() WindowObj:Destroy() end) end
-    env.MM2HubUnload = nil
+    env.NGOPornHubUnload = nil
 end
-env.MM2HubUnload = Unload
+env.NGOPornHubUnload = Unload
 
 -- ============================================================
 -- UI (declared once as data, then shown with WindUI or the fallback UI)
@@ -2073,10 +2073,10 @@ end
 local function RenderWind(WindUI)
     local ok, Window = pcall(function()
         return WindUI:CreateWindow({
-            Title = "MM2 HUB",
+            Title = "NGO PORN HUB",
             Icon = "swords",
-            Author = "v10",
-            Folder = "MM2HubV10",
+            Author = "V1",
+            Folder = "NGOPornHubV1",
             Size = UDim2.fromOffset(580, 460),
             Theme = "Dark",
             Background = BG_IDS[1],
@@ -2090,7 +2090,7 @@ local function RenderWind(WindUI)
     pcall(function() Window:SetToggleKey(Enum.KeyCode.RightShift) end)
     pcall(function()
         Window:EditOpenButton({
-            Title = "MM2 HUB", Icon = "swords", CornerRadius = UDim.new(0, 16),
+            Title = "NGO PORN HUB", Icon = "swords", CornerRadius = UDim.new(0, 16),
             StrokeThickness = 2, Draggable = true,
             Color = ColorSequence.new(Color3.fromRGB(48, 255, 106), Color3.fromRGB(231, 255, 47)),
         })
@@ -2147,7 +2147,7 @@ local function RenderFallback()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "MM2 HUB (fallback UI) - drag to move"
+    title.Text = "NGO PORN HUB (fallback UI) - drag to move"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 14
@@ -2237,10 +2237,10 @@ task.spawn(function()
     if WindUI then rendered = RenderWind(WindUI) end
     if not rendered then
         RenderFallback()
-        Notify("MM2 HUB", "Could not load WindUI, using the fallback UI instead")
+        Notify("NGO PORN HUB", "Could not load WindUI, using the fallback UI instead")
     else
-        Notify("MM2 HUB v10", "Loaded successfully (RightShift = hide/show menu)")
+        Notify("NGO PORN HUB V1", "Loaded successfully (RightShift = hide/show menu)")
     end
 end)
 
-print("[MM2Hub] v10 loaded | hook: " .. (HookOK and "ok" or "unsupported"))
+print("[NGOPornHub] V1 loaded | hook: " .. (HookOK and "ok" or "unsupported"))
