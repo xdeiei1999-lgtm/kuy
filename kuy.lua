@@ -1954,11 +1954,12 @@ end
 -- Background 2 = Asset (Decal) 14751314303 (must be converted to the real image first, otherwise it will not show)
 local BG_TEXTURE_ID = 14751314324
 local BG_ASSET_ID = 14751314303
--- Backgrounds 3 and 4: the Texture is used directly; the Asset (Decal) is the fallback
---   if the texture fails to load (the Decal is converted to its real image)
+-- Backgrounds 3 and 4: several candidate urls are tried and the first one that REALLY loads is used
+--   texture -> asset -> Decal converted to its real image -> rbxthumb thumbnail (asset / texture)
+--   ids are kept as strings so a long id can never turn into scientific notation
 local BG_EXTRA = {
-    [3] = { tex = 130393160784262, asset = 134393565381500, checked = false },
-    [4] = { tex = 90431130411810,  asset = 76524641175461,  checked = false },
+    [3] = { tex = "130393160784262", asset = "134393565381500", state = "idle" },
+    [4] = { tex = "90431130411810",  asset = "76524641175461",  state = "idle" },
 }
 local BG_IDS = {
     "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID,
@@ -1989,37 +1990,82 @@ local function ResolveDecalImage(assetId)
     return nil
 end
 
--- Check whether an image url really loads
-local function ImageLoads(url)
-    local ok, ready = pcall(function()
-        local img = Instance.new("ImageLabel")
-        img.Image = url
-        local result
-        game:GetService("ContentProvider"):PreloadAsync({ img }, function(_, status) result = status end)
-        pcall(function() img:Destroy() end)
-        return result == Enum.AssetFetchStatus.Success
+-- Check whether an image url really loads (waits up to `timeout` seconds)
+--   success = PreloadAsync reports Success OR the ImageLabel reports IsLoaded
+local function ImageLoads(url, timeout)
+    local img = Instance.new("ImageLabel")
+    img.Image = url
+    local status = nil
+    task.spawn(function()
+        pcall(function()
+            game:GetService("ContentProvider"):PreloadAsync({ img }, function(_, st) status = st end)
+        end)
     end)
-    return ok and ready == true
+    local ok = false
+    local t0 = os.clock()
+    while os.clock() - t0 < (timeout or 6) do
+        if status == Enum.AssetFetchStatus.Success then ok = true; break end
+        if status == Enum.AssetFetchStatus.Failure or status == Enum.AssetFetchStatus.TimedOut then break end
+        local loaded = false
+        pcall(function() loaded = img.IsLoaded end)
+        if loaded then ok = true; break end
+        task.wait(0.1)
+    end
+    pcall(function() img:Destroy() end)
+    return ok
+end
+
+local function SetBackgroundNow(id)
+    if not id then return end
+    if WindowObj then
+        pcall(function() WindowObj:SetBackgroundImage(id) end)
+        pcall(function() WindowObj:SetBackgroundImageTransparency(BG_ALPHA) end)
+    end
+    if FallbackBgImg then pcall(function() FallbackBgImg.Image = id end) end
+end
+
+-- Backgrounds 3 / 4: find a url that loads, keep the current background if none does
+local function ResolveExtraBackground(idx)
+    local ex = BG_EXTRA[idx]
+    ex.state = "loading"
+    task.spawn(function()
+        local candidates = {
+            function() return "rbxassetid://" .. ex.tex end,
+            function() return "rbxassetid://" .. ex.asset end,
+            function() return ResolveDecalImage(ex.asset) end,
+            function() return ResolveDecalImage(ex.tex) end,
+            function() return "rbxthumb://type=Asset&id=" .. ex.asset .. "&w=420&h=420" end,
+            function() return "rbxthumb://type=Asset&id=" .. ex.tex .. "&w=420&h=420" end,
+        }
+        local tried, found = {}, nil
+        for _, getUrl in ipairs(candidates) do
+            local ok, url = pcall(getUrl)
+            if ok and type(url) == "string" and url ~= "" and not tried[url] then
+                tried[url] = true
+                if ImageLoads(url, 6) then found = url; break end
+            end
+        end
+        if found then
+            BG_IDS[idx] = found
+            ex.state = "done"
+            if BgIndex == idx then SetBackgroundNow(found) end
+        else
+            ex.state = "idle"   -- selecting it again will retry
+            Notify("Background " .. idx, "Image failed to load (asset may be private, removed, or not an Image id). Keeping the current background.")
+        end
+    end)
 end
 
 local function ApplyBackground(idx)
     BgIndex = idx
-    -- Backgrounds 3 / 4: use the texture; if it does not load, fall back to the asset (Decal)
     local ex = BG_EXTRA[idx]
-    if ex and not ex.checked then
-        ex.checked = true
-        task.spawn(function()
-            if not ImageLoads(BG_IDS[idx]) then
-                -- 1) convert the Decal asset to its real image  2) otherwise try the asset id directly
-                local img = ResolveDecalImage(ex.asset)
-                if img then
-                    BG_IDS[idx] = img
-                elseif ImageLoads("rbxassetid://" .. ex.asset) then
-                    BG_IDS[idx] = "rbxassetid://" .. ex.asset
-                end
-            end
-            if BgIndex == idx then ApplyBackground(idx) end
-        end)
+    if ex then
+        if ex.state == "done" then
+            SetBackgroundNow(BG_IDS[idx])
+        elseif ex.state == "idle" then
+            ResolveExtraBackground(idx)
+        end
+        return
     end
     -- Background 2 (Asset): convert to the real image the first time it's selected, then set the image
     if idx == 2 and not BgAssetResolved then
@@ -2030,13 +2076,7 @@ local function ApplyBackground(idx)
             if BgIndex == 2 then ApplyBackground(2) end
         end)
     end
-    local id = BG_IDS[idx]
-    if not id then return end
-    if WindowObj then
-        pcall(function() WindowObj:SetBackgroundImage(id) end)
-        pcall(function() WindowObj:SetBackgroundImageTransparency(BG_ALPHA) end)
-    end
-    if FallbackBgImg then pcall(function() FallbackBgImg.Image = id end) end
+    SetBackgroundNow(BG_IDS[idx])
 end
 
 local Spec = {
