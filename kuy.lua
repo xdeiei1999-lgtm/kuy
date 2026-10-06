@@ -1948,16 +1948,16 @@ local function Diag()
 end
 
 -- ============================================================
--- Menu background: 2 images (selectable in the Others tab)
+-- Menu background: 3 images (selectable in the Others tab)
 -- ============================================================
 -- Background 1 = Texture 14751314324 (usable directly as an image)
 -- Background 2 = Asset (Decal) 14751314303 (must be converted to the real image first, otherwise it will not show)
 local BG_TEXTURE_ID = 14751314324
 local BG_ASSET_ID = 14751314303
--- Background 3 = Texture 134393565381500 (used directly); Asset (Decal) 130393160784262 is the fallback
+-- Background 3 = Texture 130393160784262 (used directly); Asset (Decal) 134393565381500 is the fallback
 --   if the texture fails to load (the Decal is converted to its real image)
-local BG3_TEXTURE_ID = 134393565381500
-local BG3_ASSET_ID = 130393160784262
+local BG3_TEXTURE_ID = 130393160784262
+local BG3_ASSET_ID = 134393565381500
 local BG_IDS = { "rbxassetid://" .. BG_TEXTURE_ID, "rbxassetid://" .. BG_ASSET_ID, "rbxassetid://" .. BG3_TEXTURE_ID }
 local BgAssetResolved = false
 local Bg3Checked = false
@@ -2004,8 +2004,13 @@ local function ApplyBackground(idx)
         Bg3Checked = true
         task.spawn(function()
             if not ImageLoads(BG_IDS[3]) then
+                -- 1) convert the Decal asset to its real image  2) otherwise try the asset id directly
                 local img = ResolveDecalImage(BG3_ASSET_ID)
-                if img then BG_IDS[3] = img end
+                if img then
+                    BG_IDS[3] = img
+                elseif ImageLoads("rbxassetid://" .. BG3_ASSET_ID) then
+                    BG_IDS[3] = "rbxassetid://" .. BG3_ASSET_ID
+                end
             end
             if BgIndex == 3 then ApplyBackground(3) end
         end)
