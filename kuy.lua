@@ -851,7 +851,9 @@ local function ApplyCat(cat, v)
 end
 
 do
-    local drag = nil   -- { cat, start, startBtn, moved }
+    -- เก็บการกดแยกตาม "นิ้ว/เมาส์" แต่ละอัน (key = input object)
+    -- กันนิ้วที่ใช้เดิน (จอยสติ๊ก) ไปปนกับนิ้วที่กดปุ่ม จึงเดินไปกดไปได้พร้อมกัน
+    local drags = {}   -- [input] = { cat, start, startBtn, moved }
 
     for _, cat in ipairs(FloatOrder) do
         local info = FloatInfo[cat]
@@ -895,37 +897,46 @@ do
         Connect(btn.InputBegan, function(input)
             local t = input.UserInputType
             if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
-                drag = { cat = cat, start = input.Position, startBtn = btn.Position, moved = false }
+                drags[input] = { cat = cat, start = input.Position, startBtn = btn.Position, moved = false }
             end
         end)
     end
 
+    local function DragMove(d, pos)
+        local delta = pos - d.start
+        if delta.Magnitude > 8 then d.moved = true end
+        if d.moved and not FloatLock then
+            local sb = d.startBtn
+            Floats[d.cat].btn.Position = UDim2.new(
+                sb.X.Scale, sb.X.Offset + delta.X, sb.Y.Scale, sb.Y.Offset + delta.Y)
+        end
+    end
+
     Connect(UIS.InputChanged, function(input)
-        if not drag then return end
         local t = input.UserInputType
-        if t == Enum.UserInputType.MouseMovement or t == Enum.UserInputType.Touch then
-            local d = input.Position - drag.start
-            if d.Magnitude > 8 then drag.moved = true end
-            if drag.moved and not FloatLock then
-                local sb = drag.startBtn
-                Floats[drag.cat].btn.Position = UDim2.new(
-                    sb.X.Scale, sb.X.Offset + d.X, sb.Y.Scale, sb.Y.Offset + d.Y)
+        if t == Enum.UserInputType.Touch then
+            -- ใช้เฉพาะนิ้วที่กดปุ่มนี้เท่านั้น นิ้วอื่น (เช่น จอยเดิน) ไม่เกี่ยว
+            local d = drags[input]
+            if d then DragMove(d, input.Position) end
+        elseif t == Enum.UserInputType.MouseMovement then
+            for inp, d in pairs(drags) do
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                    DragMove(d, input.Position)
+                end
             end
         end
     end)
 
     Connect(UIS.InputEnded, function(input)
-        if not drag then return end
-        local t = input.UserInputType
-        if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
-            local cat, moved = drag.cat, drag.moved
-            drag = nil
-            if not moved then
-                local nv = not Cfg[cat].on
-                ApplyCat(cat, nv)
-                local tg = Toggles[cat]
-                if tg then pcall(function() tg:Set(nv) end) end
-            end
+        local d = drags[input]
+        if not d then return end            -- ไม่ใช่นิ้ว/เมาส์ที่กดปุ่ม = ไม่ทำอะไร
+        drags[input] = nil
+        if not d.moved then
+            local cat = d.cat
+            local nv = not Cfg[cat].on
+            ApplyCat(cat, nv)
+            local tg = Toggles[cat]
+            if tg then pcall(function() tg:Set(nv) end) end
         end
     end)
 end
